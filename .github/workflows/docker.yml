@@ -40,9 +40,21 @@ jobs:
           pip install -r requirements.txt
           python -c "import turbojpeg, PIL, numpy, psutil; print('dependencies ok')"
 
+  # Built on the architecture it targets rather than through emulation: the
+  # image compiles wheels and installs a lot of apt, and qemu makes that
+  # painfully slow. Each arch is smoke tested where it was built, which is how
+  # the arm64 VirtualGL package mismatch surfaced in the first place.
   image:
-    runs-on: ubuntu-latest
     needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -51,18 +63,20 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build
+      - name: Build for the smoke test
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
           push: false
           load: true
           tags: ${{ env.IMAGE }}:ci
 
-      - name: Smoke test the image
-        # no factorio client here, so check the parts that do not need one:
-        # the python imports (turbojpeg loads), and that the entrypoint runs.
+      - name: Smoke test
+        # no factorio client here, so check what does not need one: the python
+        # imports (turbojpeg has to load, and the bundled library is x86-64
+        # only), auto.py starting, and the tools the entrypoint calls.
         run: |
           docker run --rm ${{ env.IMAGE }}:ci shell /opt/venv/bin/python -c "
           import sys; sys.path.insert(0, '/opt/factoriomaps')
@@ -70,11 +84,64 @@ jobs:
           print('imports ok, turbojpeg:', type(zoom.jpeg).__name__)"
           docker run --rm ${{ env.IMAGE }}:ci shell /opt/venv/bin/python /opt/factoriomaps/auto.py --help > /dev/null
           docker run --rm ${{ env.IMAGE }}:ci shell which gawk vglrun Xvfb > /dev/null
-          echo "smoke test passed"
+          echo "smoke test passed on ${{ matrix.platform }}"
 
       - name: Log in to the registry
-        if: github.event_name != 'pull_request' && startsWith(github.server_url, 'https://github.com')
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push this architecture by digest
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Hand the digest to the merge job
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          # the filename is the bare digest: artifact upload rejects the colon
+          # in sha256:..., and the merge job puts the prefix back
+          touch "/tmp/digests/${DIGEST#sha256:}"
+          echo "pushed $DIGEST"
+        shell: bash
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digest-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          retention-days: 1
+          if-no-files-found: error
+
+  # One tag, both architectures: docker pull picks the right one.
+  publish:
+    needs: image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -87,16 +154,16 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=sha,format=short
 
-      - name: Publish
-        if: github.event_name != 'pull_request' && startsWith(github.server_url, 'https://github.com')
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      - name: Stitch the digests into one manifest per tag
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+
+      - name: Say what landed
+        run: |
+          docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }} \
+            --format '{{range .Manifest.Manifests}}{{if .Platform.Architecture}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}{{end}}'

@@ -11,6 +11,17 @@ click from the discussion saying *why*. Issue numbers refer to
 `updates.json` stays as it is: the game reads it to show the update notice, and
 it wants one line per change, not prose.
 
+## [5.0.1] — 2026-08-11
+
+### Fixed
+
+- **Downloading a Factorio client no longer fails at the last step.** The
+  entrypoint seeded `config.ini` into a `config/` directory it had not created,
+  which under `set -euo pipefail` killed the container — after the client and
+  the expansion had already been fetched, so a gigabyte and a half of download
+  was discarded each time. A render generally escaped it, because the caller
+  usually mounts a staging directory that already has `config/` in it.
+
 ## [5.0.0] — 2026-08-11
 
 ### Added
@@ -138,13 +149,6 @@ it wants one line per change, not prose.
 - **Progress is legible in a log.** The crop, ref and zoom steps redrew a bar
   with carriage returns, which a redirected log or `docker logs` renders as one
   ever-growing line.
-
-- **Downloading a Factorio client no longer fails at the last step.** The
-  entrypoint seeded `config.ini` into a `config/` directory it had not created,
-  which under `set -euo pipefail` killed the container — after the client and
-  the expansion had already been fetched, so a gigabyte and a half of download
-  was discarded each time. A render generally escaped it, because the caller
-  usually mounts a staging directory that already has `config/` in it.
 
 ### Changed
 

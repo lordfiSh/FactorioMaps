@@ -10,7 +10,12 @@ FACTORIO_BINARY="${FACTORIO_BINARY:-$FACTORIO_DIR/bin/x64/factorio}"
 FACTORIO_USER_DIR="${FACTORIO_USER_DIR:-/data}"
 FACTORIO_VERSION="${FACTORIO_VERSION:-latest}"
 
-mkdir -p "$FACTORIO_USER_DIR/saves" "$FACTORIO_USER_DIR/mods" "$FACTORIO_USER_DIR/script-output"
+# config/ belongs here with the others, and is the one that bites when it is
+# missing: the config.ini seeding below writes into it a good fifty lines
+# before the link loop that would otherwise create it, and under
+# `set -euo pipefail` that redirection kills the container outright.
+mkdir -p "$FACTORIO_USER_DIR/saves" "$FACTORIO_USER_DIR/mods" "$FACTORIO_USER_DIR/script-output" \
+         "$FACTORIO_USER_DIR/config"
 
 # `shell` skips the client entirely, for poking at the image
 SHELL_MODE=0

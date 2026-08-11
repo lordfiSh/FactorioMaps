@@ -1,0 +1,250 @@
+name: Changelog
+
+# The answer to #258: parallel pull requests kept colliding on CHANGELOG.md
+# because every entry appends at the same anchor — the merge conflict was
+# structural, not sloppiness. So the entry moves out of the diff and into the
+# pull request body, under a `## Changelog` heading, and this workflow writes
+# it into CHANGELOG.md on main at merge time. Merges are serial, so the
+# appends are serial, and the anchor stops being shared.
+#
+# Editing CHANGELOG.md directly in a pull request keeps working — the guard
+# below accepts either — so a release commit, or anyone who prefers the old
+# way for a lone change, loses nothing. Both halves of the contract live in
+# this one file: the check that asks for an entry, and the append that lands
+# it. CHANGELOG.md carries the same contract at the top of the file.
+
+on:
+  pull_request:
+    # closed feeds the append job; the rest feed the guard. `edited` is the
+    # one that matters most: the entry lives in the body, so editing the body
+    # must re-run the check — when the guard lived in ci.yml it did not, and
+    # a description fixed after the last push stayed red until an empty
+    # commit re-delivered the event (the payload is captured per event, so
+    # even a manual re-run judged the old body).
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled, closed]
+
+# Only the append job writes; the guard gets the default read. Declared per
+# job rather than here so widening the trigger list did not widen what the
+# new events are allowed to touch.
+permissions:
+  contents: read
+
+jobs:
+  # A user-visible change with no changelog entry merges silently, and the
+  # next person to notice is reading /changelog wondering what happened. The
+  # format and the version linkage are already guarded (ChangelogPageTest,
+  # VersionSourceTest); this guards the one thing that was not — that an
+  # entry exists at all (#192).
+  #
+  # Asked on the pull request rather than drafted after the merge, because
+  # the changelog contract (README-dev) wants an entry to say why the old
+  # behaviour was a problem where that is not obvious, and that lives in the
+  # author rather than in the diff.
+  changelog:
+    # Everything but closed: the merged pull request's entry is the append
+    # job's business. The label events are here so putting no-changelog on
+    # (or taking it off) re-answers the question instead of leaving the
+    # verdict of a stale run standing.
+    if: github.event.action != 'closed' && !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Both sides of the comparison have to be present, and a shallow
+          # clone has neither the base nor the merge-base.
+          fetch-depth: 0
+
+      - name: Look for an entry
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          # Through the environment, never interpolated: the body is
+          # arbitrary text from the pull request.
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+
+          changed=$(git diff --name-only "$BASE...$HEAD")
+
+          # The surface an operator can see from the outside. Tests, CI, build
+          # tooling and documentation are deliberately absent: the changelog
+          # contract says they
+          # do not earn an entry, so they must not demand one either.
+          if ! grep -qE '^(web/|docker/|[^/]+\.(lua|py)$|info\.json$|requirements\.txt$)' <<< "$changed"; then
+            echo "No user-visible files touched — nothing to write about."
+            exit 0
+          fi
+
+          # The preferred path since #258: the entry rides in the body under
+          # a "## Changelog" heading, and the append job below writes it
+          # into the file at merge time — appends on main are serial, so
+          # parallel pull requests stop colliding on the same anchor.
+          if grep -q '^## Changelog' <<< "${BODY:-}" \
+            && awk '/^## Changelog/{grab=1; next} /^## /{grab=0} grab' <<< "${BODY:-}" | grep -q '^- \*\*'; then
+            echo "The body carries the entry; it lands in CHANGELOG.md at merge time."
+            exit 0
+          fi
+
+          if grep -qx 'CHANGELOG.md' <<< "$changed"; then
+            echo "CHANGELOG.md was updated."
+            exit 0
+          fi
+
+          cat >&2 <<'MESSAGE'
+          This pull request changes what the application does, and carries no changelog entry.
+
+          Preferred: add a "## Changelog" section to the pull request description, holding the
+          "### Added"-style subheading and the "- **Bold lead.** …" entry exactly as it should
+          read — it is written into CHANGELOG.md automatically when this merges, which is what
+          keeps parallel pull requests from colliding on the same lines. Editing CHANGELOG.md
+          directly still works too. The head of CHANGELOG.md says what earns an entry and how to write one.
+
+          If this change is genuinely not user-visible — a refactor, a test, CI, tooling — put
+          the "no-changelog" label on the pull request and this check will stand down.
+          MESSAGE
+          exit 1
+
+  append:
+    permissions:
+      contents: write
+    # Merged only: a closed-unmerged pull request's entry describes software
+    # that never shipped. Note for the day a fork contributes: their merged
+    # pull requests run this with a read-only token, so the append fails and
+    # the entry is a one-line manual commit — the guard's other path.
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+
+      - name: Take the entry out of the pull request body
+        env:
+          # Through the environment, never interpolated into the script: the
+          # body is arbitrary text from the pull request.
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+
+          body = os.environ.get("BODY") or ""
+          match = re.search(r"^## Changelog\s*$(.*?)(?=^## |\Z)", body, re.M | re.S)
+
+          if not match or not re.search(r"^- \*\*", match.group(1), re.M):
+              print("No `## Changelog` section in the body — nothing to append.")
+              open("entry.md", "w").close()
+              sys.exit(0)
+
+          entry = match.group(1)
+
+          # Coding agents sign the very end of the body — an attribution
+          # footer, sometimes a session link — and when `## Changelog` is the
+          # body's last section, that signature sits inside the extracted
+          # region and was written into CHANGELOG.md verbatim. The changelog
+          # speaks to operators about the software; who or what drafted the
+          # pull request is the pull request's business, so the signature
+          # lines are dropped here rather than asked of every author's habits.
+          entry = re.sub(r"^🤖 Generated with .*$", "", entry, flags=re.M)
+          entry = re.sub(r"^https?://claude\.ai/\S+\s*$", "", entry, flags=re.M)
+          entry = re.sub(r"^Co-Authored-By: .*$", "", entry, flags=re.M)
+          entry = re.sub(r"\n{3,}", "\n\n", entry)
+
+          open("entry.md", "w").write(entry.strip() + "\n")
+          print("Entry found:\n" + entry.strip())
+          PY
+
+      - name: Write it under the topmost release heading
+        run: |
+          python3 - <<'PY'
+          import re, sys
+
+          entry = open("entry.md").read().strip()
+
+          if not entry:
+              sys.exit(0)
+
+          changelog = open("CHANGELOG.md").read()
+
+          # The topmost release section: from the first `## [` heading to the
+          # next one (or the end of the file).
+          releases = [m.start() for m in re.finditer(r"^## \[", changelog, re.M)]
+
+          if not releases:
+              sys.exit("CHANGELOG.md has no release heading to append under.")
+
+          start = releases[0]
+          end = releases[1] if len(releases) > 1 else len(changelog)
+          section = changelog[start:end]
+
+          # The entry arrives as one or more `### Kind` blocks, each carrying
+          # bullets — the exact text that would have been written by hand.
+          order = ["Added", "Changed", "Fixed", "Removed", "Upgrading"]
+          blocks = re.findall(r"^### (\w+)\s*\n(.*?)(?=^### |\Z)", entry, re.M | re.S)
+
+          if not blocks:
+              sys.exit("The `## Changelog` section needs `### Added`-style subheadings.")
+
+          for kind, bullets in blocks:
+              bullets = bullets.strip() + "\n"
+              existing = re.search(rf"^### {kind}\s*\n(.*?)(?=^### |\Z)", section, re.M | re.S)
+
+              if existing:
+                  insert_at = existing.end(1)
+                  # The blank line after the bullets keeps the next `###`
+                  # heading breathing, when there is one.
+                  section = section[:insert_at].rstrip("\n") + "\n\n" + bullets + "\n" + section[insert_at:].lstrip("\n")
+              else:
+                  # A subsection the release does not have yet: keep the
+                  # canonical order so Added never trails Fixed.
+                  later = [k for k in order[order.index(kind) + 1:] if k in order] if kind in order else []
+                  anchor = None
+                  for k in later:
+                      m = re.search(rf"^### {k}\s*$", section, re.M)
+                      if m:
+                          anchor = m.start()
+                          break
+                  block = f"### {kind}\n\n{bullets}\n"
+                  if anchor is None:
+                      section = section.rstrip("\n") + "\n\n" + block
+                  else:
+                      section = section[:anchor] + block + section[anchor:]
+
+          rebuilt = changelog[:start] + section.rstrip("\n") + "\n"
+          if end < len(changelog):
+              rebuilt += "\n" + changelog[end:].lstrip("\n")
+
+          open("CHANGELOG.md", "w").write(rebuilt)
+          print("CHANGELOG.md updated.")
+          PY
+
+      - name: Commit, surviving a neighbour's merge
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet CHANGELOG.md; then
+            echo "Nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs(changelog): entry for #${NUMBER}, carried over from its pull request"
+
+          # Two merges minutes apart both run this; the loser of the push race
+          # rebases its one commit and tries again.
+          for attempt in 1 2 3; do
+            if git push origin master; then
+              exit 0
+            fi
+            git pull --rebase origin master
+          done
+
+          echo "::error::Could not push the changelog entry after three attempts."
+          exit 1

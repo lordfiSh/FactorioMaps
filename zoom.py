@@ -12,6 +12,8 @@ import psutil
 from PIL import Image
 from turbojpeg import TurboJPEG
 
+from progress import Progress
+
 maxQuality = False  		# Set this to true if you want to compress/postprocess the images yourself later
 useBetterEncoder = True 	# Slower encoder that generates smaller images.
 
@@ -36,13 +38,39 @@ def printErase(arg):
         pass
 
 
-# note that these are all 64 bit libraries since factorio doesnt support 32 bit.
-if os.name == "nt":
-    jpeg = TurboJPEG(Path(__file__, "..", "mozjpeg/turbojpeg.dll").resolve().as_posix())
-# elif _platform == "darwin":						# I'm not actually sure if mac can run linux libraries or not.
-# 	jpeg = TurboJPEG("mozjpeg/libturbojpeg.dylib")	# If anyone on mac has problems with the line below please make an issue :)
-else:
-    jpeg = TurboJPEG(Path(__file__, "..", "mozjpeg/libturbojpeg.so").resolve().as_posix())
+# the bundled libraries are 64 bit x86, fall back to a system libturbojpeg elsewhere
+# (macOS, and linux on anything that is not x86-64).
+def loadTurboJpeg():
+    def bundled(name):
+        path = Path(__file__, "..", "mozjpeg", name).resolve()
+        return path.as_posix() if path.is_file() else None
+
+    if os.name == "nt":
+        candidates = [bundled("turbojpeg.dll")]
+    elif _platform == "darwin":
+        candidates = [
+            "/opt/homebrew/opt/jpeg-turbo/lib/libturbojpeg.dylib",
+            "/usr/local/opt/jpeg-turbo/lib/libturbojpeg.dylib",
+        ]
+    else:
+        candidates = [
+            bundled("libturbojpeg.so"),
+            "/usr/lib/x86_64-linux-gnu/libturbojpeg.so.0",
+            "/usr/lib/aarch64-linux-gnu/libturbojpeg.so.0",
+            "/usr/lib64/libturbojpeg.so.0",
+        ]
+    candidates.append(None)  # None = let PyTurboJPEG search the default locations
+
+    for libPath in candidates:
+        if libPath is None or Path(libPath).is_file() or not Path(libPath).parent.exists():
+            try:
+                return TurboJPEG(libPath)
+            except (OSError, RuntimeError):
+                continue
+    hint = "brew install jpeg-turbo" if _platform == "darwin" else "install the libturbojpeg package"
+    raise RuntimeError(f"libturbojpeg could not be loaded. Try: {hint}")
+
+jpeg = loadTurboJpeg()
 
 
 def saveCompress(img, path: Path):
@@ -292,7 +320,7 @@ def zoom(
                         if daytimeReference is None or daytime == daytimeReference:
                             if not Path(topPath, "Images", str(map["path"]), surfaceName, daytime, str(maxzoom - 1)).is_dir():
 
-                                print(f"zoom {0:5.1f}% [{' ' * (tsize()[0]-15)}]", end="")
+                                bar = Progress("zoom")
 
                                 generateThumbnail = (
                                     needsThumbnail
@@ -384,16 +412,7 @@ def zoom(
                                 for _ in range(originalSize):
                                     resultQueue.get(True)
                                     doneSize += 1
-                                    progress = float(doneSize) / originalSize
-                                    tsiz = tsize()[0] - 15
-                                    print(
-                                        "\rzoom {:5.1f}% [{}{}]".format(
-                                            round(progress * 98, 1),
-                                            "=" * int(progress * tsiz),
-                                            " " * (tsiz - int(progress * tsiz)),
-                                        ),
-                                        end="",
-                                    )
+                                    bar.update(float(doneSize) / originalSize * 0.98)
 
                                 for p in processes:
                                     p.join()
@@ -466,4 +485,4 @@ def zoom(
 
                                     thumbnail.save(Path(imagePath, "thumbnail" + THUMBNAILEXT))
 
-                                print("\rzoom {:5.1f}% [{}]".format(100, "=" * (tsize()[0] - 15)))
+                                bar.done()

@@ -4,12 +4,20 @@ This [Factorio](http://www.factorio.com/) mod turns your factory into a timeline
 
 Mod portal link: https://mods.factorio.com/mod/L0laapk3_FactorioMaps
 
+# Factorio version support
+Version 5.0.0 and up target **Factorio 2.1**. For Factorio 1.1, use the [4.4.0 release](https://github.com/L0laapk3/FactorioMaps/releases).
+
+Space Age is fully supported: `--all-surfaces` captures every charted planet and space platform in one go. The map viewer lists planets on the left and platforms on the right, with each platform shown under its in-game name and current station. The info button in the bottom left opens map details, the player list, the mod list and credits.
+
 # How to Install
 **Note that this program now only runs on 64 bit python version 3.6 or higher.**
 1. Download FactorioMaps to `%appdata%\mods\`, either from the [mod portal](https://mods.factorio.com/mod/L0laapk3_FactorioMaps) (The mod does not need to be enabled to work) and then unzipping it, or from [the github releases page](https://github.com/L0laapk3/FactorioMaps/releases).
 1. Install the latest version of [**64 bit** python **3**](https://www.python.org/downloads/).
 Make sure to do a select the "add python to PATH" and "install pip" options.
 1. Inside the factoriomaps folder, install the required pip packages: `python -m pip install --upgrade -r requirements.txt`.
+
+### macOS
+The steps above work the same (use `~/Library/Application Support/factorio/mods/` as the mods folder). Additionally, install the jpeg library once with [Homebrew](https://brew.sh): `brew install jpeg-turbo`. The factorio binary is found automatically for standalone (`/Applications/factorio.app`) and Steam installs.
 
 # How to Use
 1. Make sure you close factorio before starting the process.
@@ -44,6 +52,7 @@ Heres a list of flags that `auto.py` can accept:
 | `--connect-range=1.2`*\** | The maximum range from connection buildings (rails, electric poles) around which pictures are saved. |
 | `--tag-range=5.2`*\** | The maximum range from mapview tags around which pictures are saved. |
 | `--surface=nauvis` | Used to capture other surfaces. If left empty, the surface the player is standing on will be used. To capture multiple surfaces, use the argument multiple times: `--surface=nauvis --surface="Factory floor 1"`. To find out the names of surfaces, use the command `/c for _,s in pairs(game.surfaces) do game.print(s.name) end`. |
+| `--all-surfaces` | Capture every surface that has been charted, e.g. all visited planets and space platforms. |
 | `--factorio=PATH` | Use `factorio.exe` from *PATH* instead of attempting to find it in common locations. |
 | `--modpath=PATH` | Use *PATH* as the mod folder. |
 | `--basepath=RELPATH` | Output to `script-output\RELPATH` instead of `script-output\FactorioMaps`. (Factorio cannot output outside of `script-output`) |

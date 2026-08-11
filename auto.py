@@ -9,13 +9,9 @@ import traceback
 from pathlib import Path
 
 try:
-    import pkg_resources
-    from pkg_resources import DistributionNotFound, VersionConflict
-    try:
-        with Path(__file__, "..", "requirements.txt").resolve().open("r", encoding="utf-8") as f:
-            pkg_resources.require(f.read().splitlines())
-    except (DistributionNotFound, VersionConflict) as ex:
-        raise ImportError from ex
+    import importlib
+    for module in ("psutil", "PIL", "numpy", "turbojpeg"):
+        importlib.import_module(module)
 except ImportError as ex:
     traceback.print_exc()
     print("\nDependencies not met. Run `pip install -r requirements.txt` to install missing dependencies.")
@@ -54,7 +50,28 @@ from ref import ref
 from updateLib import update as updateLib
 from zoom import zoom, zoomRenderboxes
 
-userFolder = Path(__file__, "..", "..", "..").resolve()
+def findUserFolder():
+    # explicit wins, for containers and other unusual layouts
+    if os.getenv("FACTORIO_USER_DIR"):
+        return Path(os.getenv("FACTORIO_USER_DIR")).resolve()
+    candidates = [Path(__file__, "..", "..", "..").resolve()]
+    if os.name == "nt":
+        if os.getenv("APPDATA"):
+            candidates.append(Path(os.getenv("APPDATA"), "Factorio"))
+    elif sys.platform == "darwin":
+        candidates.append(Path.home() / "Library" / "Application Support" / "factorio")
+    else:
+        candidates.append(Path.home() / ".factorio")
+    for candidate in candidates:
+        if (candidate / "saves").is_dir() and (candidate / "mods").is_dir():
+            return candidate
+    return candidates[0]
+
+userFolder = findUserFolder()
+
+# factorio's rich text names some prototype types differently to data.raw
+RICH_TEXT_TYPE_ALIASES = {"virtual-signal": "virtual"}
+
 
 def naturalSort(l):
     convert = lambda text: int(text) if text.isdigit() else text.lower()
@@ -252,10 +269,25 @@ def linkCustomModFolder(modpath: Path):
     linkDir(Path(modpath, Path('.').resolve().name), Path("."))
 
 
+def buildDefaultModlist(modpath: Path):
+    # factorio writes this itself on first launch; a fresh mod folder (a container,
+    # say) has none yet, so mirror what it would produce: everything present, enabled.
+    names = {"base"}
+    for entry in modpath.iterdir():
+        match = re.match(r"^(.*)_\d+\.\d+\.\d+$", entry.stem if entry.suffix == ".zip" else entry.name)
+        if match and match.group(1) != "L0laapk3_FactorioMaps":
+            names.add(match.group(1))
+    return {"mods": [{"name": name, "enabled": True} for name in sorted(names)]}
+
+
 def changeModlist(modpath: Path,newState: bool):
     print(f"{'Enabling' if newState else 'Disabling'} FactorioMaps mod")
     done = False
     modlistPath = Path(modpath, "mod-list.json")
+    if not modlistPath.is_file():
+        print(f"No mod-list.json in {modpath}, enabling every mod found there")
+        with modlistPath.open("w", encoding="utf-8") as f:
+            json.dump(buildDefaultModlist(modpath), f, indent=2)
     with modlistPath.open("r", encoding="utf-8") as f:
         modlist = json.load(f)
     for mod in modlist["mods"]:
@@ -299,7 +331,10 @@ def buildAutorun(args: Namespace, workFolder: Path, outFolder: Path, isFirstSnap
         return str(value).lower()
 
     with AUTORUN_PATH.resolve().open("w", encoding="utf-8") as f:
-        surfaceString = '{"' + '", "'.join(args.surface) + '"}' if args.surface else "nil"
+        if args.all_surfaces:
+            surfaceString = '"all"'
+        else:
+            surfaceString = '{"' + '", "'.join(args.surface) + '"}' if args.surface else "nil"
         autorunString = \
             f'''fm.autorun = {{
             HD = {lowerBool(args.hd)},
@@ -309,7 +344,7 @@ def buildAutorun(args: Namespace, workFolder: Path, outFolder: Path, isFirstSnap
             around_tag_range = {args.tag_range},
             around_build_range = {args.build_range},
             around_connect_range = {args.connect_range},
-            connect_types = {{"lamp", "electric-pole", "radar", "straight-rail", "curved-rail", "rail-signal", "rail-chain-signal", "locomotive", "cargo-wagon", "fluid-wagon", "car"}},
+            connect_types = {{"lamp", "electric-pole", "radar", "straight-rail", "curved-rail-a", "curved-rail-b", "half-diagonal-rail", "legacy-straight-rail", "legacy-curved-rail", "elevated-straight-rail", "elevated-curved-rail-a", "elevated-curved-rail-b", "elevated-half-diagonal-rail", "rail-ramp", "rail-support", "rail-signal", "rail-chain-signal", "locomotive", "cargo-wagon", "fluid-wagon", "car"}},
             date = "{datetime.datetime.strptime(args.date, "%d/%m/%y").strftime("%d/%m/%y")}",
             surfaces = {surfaceString},
             name = "{str(outFolder) + "/"}",
@@ -350,7 +385,13 @@ def buildConfig(args: Namespace, tmpDir, basepath):
         configFile.writelines(("; version=3\n", ))
         config.write(configFile, space_around_delimiters=False)
 
-    copy(Path(userFolder, 'player-data.json'), tmpDir)
+    # a fresh install (or a container) has no player-data.json yet
+    playerData = Path(userFolder, 'player-data.json')
+    if playerData.is_file():
+        copy(playerData, tmpDir)
+    else:
+        with Path(tmpDir, 'player-data.json').open("w", encoding="utf-8") as f:
+            f.write("{}")
 
     return configPath
 
@@ -366,7 +407,10 @@ def auto(*args):
                     if os.name == 'nt':
                         subprocess.check_call(("taskkill", "/pid", str(pid)), stdout=subprocess.DEVNULL, shell=True)
                     else:
-                        subprocess.check_call(("killall", "factorio"), stdout=subprocess.DEVNULL)	# TODO: kill correct process instead of just killing all
+                        try:
+                            psutil.Process(pid).terminate()
+                        except psutil.NoSuchProcess:
+                            pass
 
                     while psutil.pid_exists(pid):
                         time.sleep(0.1)
@@ -387,6 +431,7 @@ def auto(*args):
     parser.add_argument("--connect-range", type=float, default=1.2, help="The maximum range from connection buildings (rails, electric poles) around which pictures are saved.")
     parser.add_argument("--tag-range", type=float, default=5.2, help="The maximum range from mapview tags around which pictures are saved.")
     parser.add_argument("--surface", action="append", default=[], help="Used to capture other surfaces. If left empty, the surface the player is standing on will be used. To capture multiple surfaces, use the argument multiple times: --surface nauvis --surface 'Factory floor 1'")
+    parser.add_argument("--all-surfaces", dest="all_surfaces", action="store_true", help="Capture every surface that has been charted, e.g. all visited planets and space platforms.")
     parser.add_argument("--factorio", type=lambda p: Path(p).resolve(), help="Use factorio.exe from PATH instead of attempting to find it in common locations.")
     parser.add_argument("--output-path", dest="basepath", type=lambda p: Path(p).resolve(), default=Path(userFolder, "script-output", "FactorioMaps"), help="path to the output folder (default is '..\\..\\script-output\\FactorioMaps')")
     parser.add_argument("--mod-path", "--modpath", type=lambda p: Path(p).resolve(), default=Path(userFolder, 'mods'), help="Use PATH as the mod folder. (default is '..\\..\\mods')")
@@ -472,11 +517,21 @@ def auto(*args):
         availableDrives = [
             "%s:/" % d for d in string.ascii_uppercase if driveExists(d)
         ]
+        macPathsStandalone = [
+            "/Applications/factorio.app/Contents/MacOS/factorio",
+        ]
+        macPathsSteam = [
+            str(Path.home() / "Library/Application Support/Steam/steamapps/common/Factorio/factorio.app/Contents/MacOS/factorio"),
+        ]
         possibleFactorioPaths = unixPaths
         if args.steam == 0:
             possibleFactorioPaths += [ drive + path for drive in availableDrives for path in windowsPathsStandalone ]
+            if sys.platform == "darwin":
+                possibleFactorioPaths += macPathsStandalone
         if args.standalone == 0:
             possibleFactorioPaths += [ drive + path for drive in availableDrives for path in windowsPathsSteam ]
+            if sys.platform == "darwin":
+                possibleFactorioPaths += macPathsSteam
 
     try:
         factorioPath = next(
@@ -771,87 +826,104 @@ def auto(*args):
 
 
         rawTags["__used"] = True
-        if args.tags:
-            print("updating labels")
-            tags = {}
-            def addTag(tags, itemType, itemName, force=False):
-                index = itemType + itemName[0].upper() + itemName[1:]
-                if index in rawTags:
-                    tags[index] = {
-                        "itemType": itemType,
-                        "itemName": itemName,
-                        "iconPath": "Images/labels/" + itemType + "/" + itemName + ".png",
-                    }
+        # surface icons are always needed by the web ui, tag icons only with --tags
+        print("updating labels")
+        tags = {}
+        def addTag(tags, itemType, itemName, force=False):
+            # rich text says [virtual-signal=x], the data stage indexes it as "virtual"
+            itemType = RICH_TEXT_TYPE_ALIASES.get(itemType, itemType)
+            index = itemType + itemName[0].upper() + itemName[1:]
+            if index in rawTags:
+                tags[index] = {
+                    "itemType": itemType,
+                    "itemName": itemName,
+                    "iconPath": "Images/labels/" + itemType + "/" + itemName + ".png",
+                }
+            else:
+                if force:
+                    raise "tag not found."
                 else:
-                    if force:
-                        raise "tag not found."
-                    else:
-                        print(f"[WARNING] tag \"{index}\" not found.")
-            with Path(workfolder, "mapInfo.json").open('r+', encoding='utf-8') as mapInfoJson:
-                data = json.load(mapInfoJson)
-                for mapStuff in data["maps"]:
-                    for surfaceName, surfaceStuff in mapStuff["surfaces"].items():
-                        if "tags" in surfaceStuff:
-                            for tag in surfaceStuff["tags"]:
-                                if "iconType" in tag:
-                                    addTag(tags, tag["iconType"], tag["iconName"], True)
-                                if "text" in tag:
-                                    for match in re.finditer(r"\[([^=]+)=([^\]]+)", tag["text"]):
-                                        addTag(tags, match.group(1), match.group(2))
+                    print(f"[WARNING] tag \"{index}\" not found.")
+        with Path(workfolder, "mapInfo.json").open('r+', encoding='utf-8') as mapInfoJson:
+            data = json.load(mapInfoJson)
+            for mapStuff in data["maps"]:
+                for surfaceName, surfaceStuff in mapStuff["surfaces"].items():
+                    # planet/platform icons for the surface list, regardless of --no-tags
+                    if "iconType" in surfaceStuff and "iconName" in surfaceStuff:
+                        addTag(tags, surfaceStuff["iconType"], surfaceStuff["iconName"])
+                    # players can put rich text in platform names
+                    if "label" in surfaceStuff:
+                        for match in re.finditer(r"\[([^=\]]+)=([^\]]+)\]", surfaceStuff["label"]):
+                            addTag(tags, match.group(1), match.group(2))
+                    if args.tags and "tags" in surfaceStuff:
+                        for tag in surfaceStuff["tags"]:
+                            if "iconType" in tag:
+                                addTag(tags, tag["iconType"], tag["iconName"], True)
+                            if "text" in tag:
+                                for match in re.finditer(r"\[([^=]+)=([^\]]+)", tag["text"]):
+                                    addTag(tags, match.group(1), match.group(2))
 
+        # without a game launch (--dry) there are no raw tag paths, keep the existing icons
+        if len(rawTags) <= 1:
+            print("no icon data from the game, keeping existing labels")
+            tags = {}
+        else:
             rmtree(os.path.join(workfolder, "Images", "labels"), ignore_errors=True)
 
-            for tagIndex, tag in tags.items():
-                dest = os.path.join(workfolder, tag["iconPath"])
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
+        for tagIndex, tag in tags.items():
+            dest = os.path.join(workfolder, tag["iconPath"])
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
 
-                rawPath = rawTags[tagIndex]
+            rawPath = rawTags[tagIndex]
 
-                icons = rawPath.split('|')
-                img = None
-                for i, path in enumerate(icons):
-                    m = re.match(r"^__([^\/]+)__[\/\\](.*)$", path)
-                    if m is None:
-                        raise Exception("raw path of %s %s: %s not found" % (tag["iconType"], tag["iconName"], path))
+            icons = rawPath.split('|')
+            img = None
+            for i, path in enumerate(icons):
+                m = re.match(r"^__([^\/]+)__[\/\\](.*)$", path)
+                if m is None:
+                    raise Exception("raw path of %s %s: %s not found" % (tag["iconType"], tag["iconName"], path))
 
-                    iconColor = m.group(2).split("?")
-                    icon = iconColor[0]
-                    if m.group(1) in ("base", "core"):
-                        src = os.path.join(os.path.split(factorioPath)[0], "../../data", m.group(1), icon + ".png")
+                iconColor = m.group(2).split("?")
+                icon = iconColor[0]
+                if m.group(1) in ("base", "core", "space-age", "quality", "elevated-rails"):
+                    dataDir = Path(factorioPath, "..", "..", "..", "data").resolve()
+                    if not dataDir.is_dir():  # macOS app bundle: factorio.app/Contents/MacOS/factorio -> Contents/data
+                        dataDir = Path(factorioPath, "..", "..", "data").resolve()
+                    src = os.path.join(dataDir, m.group(1), icon + ".png")
+                else:
+                    mod = next(mod for mod in modVersions if mod[0] == m.group(1).lower())
+                    if not mod[1][3]: #true if mod is zip
+                        zipPath = os.path.join(args.basepath, args.mod_path, mod[2] + ".zip")
+                        with ZipFile(zipPath, 'r') as zipObj:
+                            internalFolder = os.path.commonpath(zipObj.namelist())
+                            if len(icons) == 1:
+                                zipInfo = zipObj.getinfo(os.path.join(internalFolder, icon + ".png").replace('\\', '/'))
+                                zipInfo.filename = os.path.basename(dest)
+                                zipObj.extract(zipInfo, os.path.dirname(os.path.realpath(dest)))
+                                src = None
+                            else:
+                                src = zipObj.extract(os.path.join(internalFolder, icon + ".png").replace('\\', '/'), os.path.join(tempfile.gettempdir(), "FactorioMaps"))
                     else:
-                        mod = next(mod for mod in modVersions if mod[0] == m.group(1).lower())
-                        if not mod[1][3]: #true if mod is zip
-                            zipPath = os.path.join(args.basepath, args.mod_path, mod[2] + ".zip")
-                            with ZipFile(zipPath, 'r') as zipObj:
-                                internalFolder = os.path.commonpath(zipObj.namelist())
-                                if len(icons) == 1:
-                                    zipInfo = zipObj.getinfo(os.path.join(internalFolder, icon + ".png").replace('\\', '/'))
-                                    zipInfo.filename = os.path.basename(dest)
-                                    zipObj.extract(zipInfo, os.path.dirname(os.path.realpath(dest)))
-                                    src = None
-                                else:
-                                    src = zipObj.extract(os.path.join(internalFolder, icon + ".png").replace('\\', '/'), os.path.join(tempfile.gettempdir(), "FactorioMaps"))
-                        else:
-                            src = os.path.join(args.basepath, args.mod_path, mod[2], icon + ".png")
+                        src = os.path.join(args.basepath, args.mod_path, mod[2], icon + ".png")
 
-                    if len(icons) == 1:
-                        if src is not None:
-                            img = Image.open(src)
-                            w, h = img.size
-                            img = img.crop((0, 0, h, h)).resize((64, 64))
-                            img.save(dest)
+                if len(icons) == 1:
+                    if src is not None:
+                        img = Image.open(src)
+                        w, h = img.size
+                        img = img.crop((0, 0, h, h)).resize((64, 64))
+                        img.save(dest)
+                else:
+                    newImg = Image.open(src)
+                    w, h = newImg.size
+                    newImg = newImg.crop((0, 0, h, h)).resize((64, 64)).convert("RGBA")
+                    if len(iconColor) > 1:
+                        newImg = ImageChops.multiply(newImg, Image.new("RGBA", newImg.size, color=tuple(map(lambda s: int(round(float(s))), iconColor[1].split("%")))))
+                    if i == 0:
+                        img = newImg
                     else:
-                        newImg = Image.open(src)
-                        w, h = newImg.size
-                        newImg = newImg.crop((0, 0, h, h)).resize((64, 64)).convert("RGBA")
-                        if len(iconColor) > 1:
-                            newImg = ImageChops.multiply(newImg, Image.new("RGBA", newImg.size, color=tuple(map(lambda s: int(round(float(s))), iconColor[1].split("%")))))
-                        if i == 0:
-                            img = newImg
-                        else:
-                            img.paste(newImg.convert("RGB"), (0, 0), newImg)
-                if len(icons) > 1:
-                    img.save(dest)
+                        img.paste(newImg.convert("RGB"), (0, 0), newImg)
+            if len(icons) > 1:
+                img.save(dest)
 
 
 
@@ -862,9 +934,10 @@ def auto(*args):
                 if args.default_timestamp == None:
                     args.default_timestamp = -1
                 mapInfo["options"]["defaultTimestamp"] = args.default_timestamp
-                f.seek(0)
-                json.dump(mapInfo, f)
-                f.truncate()
+            mapInfo["generatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+            f.seek(0)
+            json.dump(mapInfo, f)
+            f.truncate()
 
 
 
@@ -876,8 +949,50 @@ def auto(*args):
 
 
         print("creating index.html")
-        for fileName in ("index.html", "index.css", "index.js"):
+        for fileName in ("index.css", "index.js"):
             copy(Path(__file__, "..", "web", fileName).resolve(), os.path.join(workfolder, fileName))
+
+        # fill in the opengraph placeholders so shared links show what the map contains
+        surfaceKinds = {}
+        for surfaceStuff in mapInfo["maps"][-1]["surfaces"].values():
+            if surfaceStuff.get("captured"):
+                surfaceKinds[surfaceStuff.get("kind", "other")] = surfaceKinds.get(surfaceStuff.get("kind", "other"), 0) + 1
+        snapshots = mapInfo["maps"]
+        summary = [f"{len(snapshots)} snapshot{'s' if len(snapshots) != 1 else ''}"]
+        if len(snapshots) > 1:
+            summary[0] += f" ({snapshots[0]['path']}h – {snapshots[-1]['path']}h)"
+        else:
+            summary[0] += f" ({snapshots[-1]['path']}h)"
+        parts = []
+        if surfaceKinds.get("planet"):
+            parts.append(f"{surfaceKinds['planet']} planet{'s' if surfaceKinds['planet'] != 1 else ''}")
+        if surfaceKinds.get("platform"):
+            parts.append(f"{surfaceKinds['platform']} space platform{'s' if surfaceKinds['platform'] != 1 else ''}")
+        if surfaceKinds.get("other"):
+            parts.append(f"{surfaceKinds['other']} other surface{'s' if surfaceKinds['other'] != 1 else ''}")
+        if parts:
+            summary.append(", ".join(parts))
+        modCount = len([m for m in (mapInfo.get("info", {}).get("mods") or {}) if m not in ("base", "L0laapk3_FactorioMaps")])
+        if modCount:
+            summary.append(f"{modCount} mods")
+        baseVersion = (mapInfo.get("info", {}).get("mods") or {}).get("base")
+        if baseVersion:
+            summary.append(f"Factorio {baseVersion}")
+
+        def escapeAttribute(text):
+            return str(text).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+
+        replacements = {
+            "{{OG_TITLE}}": escapeAttribute(f"{foldername} – FactorioMaps"),
+            "{{OG_DESCRIPTION}}": escapeAttribute(" · ".join(summary)),
+            "{{OG_IMAGE_ALT}}": escapeAttribute(f"Map of {foldername}"),
+        }
+        with Path(__file__, "..", "web", "index.html").resolve().open("r", encoding="utf-8") as f:
+            indexHtml = f.read()
+        for token, value in replacements.items():
+            indexHtml = indexHtml.replace(token, value)
+        with Path(workfolder, "index.html").open("w", encoding="utf-8") as f:
+            f.write(indexHtml)
         try:
             rmtree(os.path.join(workfolder, "lib"))
         except (FileNotFoundError, NotADirectoryError):

@@ -62,6 +62,22 @@ script.on_event(defines.events.on_tick, function(event)
 				fm.autorun.mapInfo.maps = {}
 			end
 		
+			-- refreshed every run so the info panel reflects the newest snapshot
+			local players = {}
+			for _, p in pairs(game.players) do
+				players[#players+1] = {
+					name = p.name,
+					online_time = p.online_time,
+					admin = p.admin,
+					force = p.force.name
+				}
+			end
+			fm.autorun.mapInfo.info = {
+				players = players,
+				mods = script.active_mods,
+				surfaceCount = #game.surfaces
+			}
+
 			fm.savename = fm.autorun.name or ""
 			fm.topfolder = fm.savename
 			fm.autorun.tick = game.tick
@@ -89,6 +105,39 @@ script.on_event(defines.events.on_tick, function(event)
 			fm.API.pull()
 
 			
+			if fm.autorun.surfaces == "all" then
+				-- discover every surface charted by a player force, including space platforms
+				fm.autorun.surfaces = {}
+				for _, surface in pairs(game.surfaces) do
+					local include = false
+					if surface.platform ~= nil then
+						-- space platforms are always visible to their force, include them if any chunk exists
+						for chunk in surface.get_chunks() do
+							if surface.is_chunk_generated(chunk) then
+								include = true
+								break
+							end
+						end
+					else
+						for chunk in surface.get_chunks() do
+							for _, force in pairs(game.forces) do
+								if #force.players > 0 and force.is_chunk_charted(surface, chunk) then
+									include = true
+									break
+								end
+							end
+							if include then
+								break
+							end
+						end
+					end
+					if include then
+						fm.autorun.surfaces[#fm.autorun.surfaces+1] = surface.name
+						log("Discovered charted surface: " .. surface.name)
+					end
+				end
+			end
+
 			if fm.autorun.surfaces == nil then
 				if fm.autorun.mapInfo.defaultSurface == nil then
 					if game.surfaces["battle_surface_1"] then	-- detect pvp scenario
@@ -160,7 +209,7 @@ script.on_event(defines.events.on_tick, function(event)
 				local surface = game.surfaces[surfaceName]
 				latest = fm.autorun.name:sub(1, -2):gsub(" ", "/") .. " " .. fm.autorun.filePath .. " " .. surfaceName:gsub(" ", "|") .. " " .. fm.autorun.daytime .. "\n" .. latest
 			end
-			game.write_file(fm.topfolder .. "latest.txt", latest, false, event.player_index)
+			helpers.write_file(fm.topfolder .. "latest.txt", latest, false, event.player_index)
 			
 
 
@@ -181,8 +230,8 @@ script.on_event(defines.events.on_tick, function(event)
 			-- 	fm.teleportedPlayer = true
 			-- end
 			
-			-- remove no path sign and ghost entities
-			for key, entity in pairs(fm.currentSurface.find_entities_filtered({type={"flying-text","entity-ghost","tile-ghost"}})) do
+			-- remove ghost entities. no path signs are not entities anymore since 2.0
+			for key, entity in pairs(fm.currentSurface.find_entities_filtered({type={"entity-ghost","tile-ghost"}})) do
 				entity.destroy()
 			end
 
@@ -195,17 +244,22 @@ script.on_event(defines.events.on_tick, function(event)
 			end
 
 			-- freeze all entities. Eventually, stuff will run out of power, but for just 2 ticks, it should be fine.
-			for key, entity in pairs(fm.currentSurface.find_entities_filtered({invert=true, name="hidden-electric-energy-interface"})) do
+			-- some entity types have a read only active flag in 2.x, skip those.
+			local function deactivate(entity)
 				entity.active = false
+			end
+			for key, entity in pairs(fm.currentSurface.find_entities_filtered({invert=true, name="hidden-electric-energy-interface"})) do
+				pcall(deactivate, entity)
 			end
 
 
 
+			-- some surfaces (e.g. space platforms) may not allow changing daytime
 			if fm.autorun.daytime == "day" then
-				fm.currentSurface.daytime = 0
+				pcall(function() fm.currentSurface.daytime = 0 end)
 				fm.generateMap(event)
 			else
-				fm.currentSurface.daytime = 0.5
+				pcall(function() fm.currentSurface.daytime = 0.5 end)
 				fm.generateMap(event)
 			end
 			
@@ -213,15 +267,13 @@ script.on_event(defines.events.on_tick, function(event)
 
 		elseif fm.ticks < 2 then
 			
-			game.write_file(fm.topfolder .. "Images/" .. fm.autorun.filePath .. "/" .. fm.currentSurface.name .. "/" .. fm.autorun.daytime .. "/done.txt", "", false, event.player_index)
-	
-			-- remove no path sign
-			for key, entity in pairs(fm.currentSurface.find_entities_filtered({type="flying-text"})) do
-				entity.destroy()
-			end
+			helpers.write_file(fm.topfolder .. "Images/" .. fm.autorun.filePath .. "/" .. fm.currentSurface.name .. "/" .. fm.autorun.daytime .. "/done.txt", "", false, event.player_index)
 
-	
 			fm.ticks = 2
+
+		elseif #fm.autorun.surfaces > 0 then
+
+			fm.ticks = nil	-- more surfaces to capture in this launch
 
 		else
 			fm.topfolder = nil
@@ -256,7 +308,7 @@ script.on_event(defines.events.on_tick, function(event)
 		game.tick_paused = true
 		game.ticks_to_run = 0
 		if player.character then
-			player.character.active = false
+			pcall(function() player.character.active = false end) -- read only for some character states in 2.x
 		end
 		
 		local main = player.gui.center.add{type = "frame", caption = text[1], direction = "vertical"}

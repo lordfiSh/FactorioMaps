@@ -106,10 +106,14 @@ jobs:
 
       - name: Hand the digest to the merge job
         if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           mkdir -p /tmp/digests
-          touch "/tmp/digests/${{ steps.push.outputs.digest }}"
-          echo "pushed ${{ steps.push.outputs.digest }}"
+          # the filename is the bare digest: artifact upload rejects the colon
+          # in sha256:..., and the merge job puts the prefix back
+          touch "/tmp/digests/${DIGEST#sha256:}"
+          echo "pushed $DIGEST"
         shell: bash
 
       - uses: actions/upload-artifact@v4

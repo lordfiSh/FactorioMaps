@@ -38,6 +38,28 @@ it wants one line per change, not prose.
   the GPU instead, worth about 30% wall clock on an Intel UHD 620. Software
   rendering stays a supported fallback — slower, not broken.
 
+- **Space Age maps.** `--all-surfaces` captures every surface a force has
+  charted — each visited planet and each space platform — in one run instead of
+  one invocation per surface. The viewer grew a browser for them: planets down
+  the left, platforms down the right under the name the player gave them and the
+  planet they are parked at, rich text in those names rendered as the icons it
+  stands for. (#133)
+
+- **An info panel.** The button in the bottom left opens what the map cannot say
+  for itself: how many snapshots and surfaces it holds, the Factorio version, who
+  played and for how long, every mod and its version, and credits.
+
+- **Link previews.** Opengraph and Twitter card tags are filled in per map, so a
+  shared link shows the Nauvis thumbnail and the snapshot, surface and mod counts
+  rather than a bare URL.
+
+- **A container for running captures on a server.** Factorio only renders in the
+  full client, so headless has never worked. `docker/` runs the real client
+  against a virtual display; because Xvfb has no direct rendering and plain GLX
+  therefore lands on llvmpipe, VirtualGL renders through the GPU instead, worth
+  about 30% wall clock on an Intel UHD 620. Software rendering stays a supported
+  fallback — slower, not broken.
+
 ### Fixed
 
 - **Captures no longer stop after the first surface.** The surface loop declared
@@ -81,6 +103,42 @@ it wants one line per change, not prose.
   ever-growing line. They now print a line every few percent when output is not
   a terminal, and are unchanged when it is.
 
+- **Captures no longer stop after the first surface.** The surface loop declared
+  itself done once one surface finished, so the game sat on its "finished
+  capturing" screen while the script waited for a `done.txt` that would never be
+  written — a hang with no error, on any map with more than one surface. (#116)
+
+- **A fresh install can compress images again.** `PyTurboJPEG>=1.1.5` has no
+  upper bound, and 2.0 dropped support for libjpeg-turbo 2.x — which is exactly
+  what `mozjpeg/` ships. Every new install therefore died on import with a
+  message about a library version, nowhere near the requirement that chose it.
+
+- **The web assets are readable by whoever runs the map.** `updateLib` copies
+  them out of a `TemporaryDirectory`, which exists at mode 0700, and `copytree`
+  carried that straight into `web/lib`.
+
+- **Item icons in map labels resolve for virtual signals.** Rich text writes
+  `[virtual-signal=x]`, the data stage indexes those prototypes as `virtual`, and
+  nothing reconciled the two. (#93)
+
+- **A missing `mod-list.json` or `player-data.json` no longer ends the run.**
+  Factorio writes both on first launch; a mod folder that had never seen one
+  crashed the script instead of being given one.
+
+- **`--dry` keeps the icons it did not generate.** A dry run never receives icon
+  paths from the game, and rebuilt the label folder from that emptiness.
+
+- **Only the factorio this script started gets killed.** It ran `killall
+  factorio`, which on a machine playing the game ended the player's session too.
+  (#102)
+
+- **A mod may un-hide a surface again.** `surface_set_hidden(surface, false)`
+  called a method that does not exist on a Lua table.
+
+- **Progress is legible in a log.** The crop, ref and zoom steps redrew a bar
+  with carriage returns, which a redirected log or `docker logs` renders as one
+  ever-growing line.
+
 ### Changed
 
 - **The mod targets Factorio 2.1 and needs it.** `info.json` declares
@@ -96,3 +154,11 @@ it wants one line per change, not prose.
   and tag icons are read from inside the application bundle.
 
 [5.0.0]: https://github.com/lordfiSh/FactorioMaps/releases/tag/v5.0.0
+
+- **The mod targets Factorio 2.1 and needs it.** `info.json` declares
+  `factorio_version: 2.1`; 1.1 users stay on 4.4.0. (#133)
+
+- **macOS is a supported platform.** The binary is found in both standalone and
+  Steam locations, the user data folder is located per platform, `libturbojpeg`
+  is taken from the system when the bundled one does not fit the architecture,
+  and tag icons are read from inside the application bundle.

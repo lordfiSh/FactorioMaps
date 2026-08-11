@@ -139,6 +139,13 @@ it wants one line per change, not prose.
   with carriage returns, which a redirected log or `docker logs` renders as one
   ever-growing line.
 
+- **Downloading a Factorio client no longer fails at the last step.** The
+  entrypoint seeded `config.ini` into a `config/` directory it had not created,
+  which under `set -euo pipefail` killed the container — after the client and
+  the expansion had already been fetched, so a gigabyte and a half of download
+  was discarded each time. A render generally escaped it, because the caller
+  usually mounts a staging directory that already has `config/` in it.
+
 ### Changed
 
 - **The mod targets Factorio 2.1 and needs it.** `info.json` declares

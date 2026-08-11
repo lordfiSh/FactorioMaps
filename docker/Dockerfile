@@ -30,8 +30,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Xvfb has no DRI, so GLX inside it always lands on llvmpipe. VirtualGL renders
 # through the GPU with EGL and blits the result back to the virtual display.
 ARG VIRTUALGL_VERSION=3.1.1
-RUN curl -fsSL -o /tmp/virtualgl.deb \
-        "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_amd64.deb" \
+RUN arch="$(dpkg --print-architecture)" \
+    && curl -fsSL -o /tmp/virtualgl.deb \
+        "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_${arch}.deb" \
     && apt-get update \
     && apt-get install -y --no-install-recommends /tmp/virtualgl.deb \
     && rm -f /tmp/virtualgl.deb && rm -rf /var/lib/apt/lists/*

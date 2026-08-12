@@ -482,6 +482,7 @@ let map = L.map('map', {
 	fadeAnimation: false,
 	zoomAnimation: true,
 	crs: L.CRS.Simple, // the map is 2D by nature
+	attributionControl: false, // credits live in the info panel instead
 });
 let nightOverlayPane = map.createPane("overlayPaneNight");
 nightOverlayPane.style.zIndex = 450;
@@ -791,7 +792,9 @@ if (timeSlider)
 
 if (!mapLoadedBySlider)
 	map.addLayer(loadLayer.day || loadLayer.night);
-map.addControl(new L.Control.FullScreen().setPosition('bottomright'));
+// forceSeparateButton: without it the plugin injects its button into the zoom
+// control's container, which the setPosition() below rebuilds - losing the button.
+map.addControl(new L.Control.FullScreen({ forceSeparateButton: true }).setPosition('bottomright'));
 map.zoomControl.setPosition('bottomleft')
 
 
@@ -816,7 +819,7 @@ function formatEuropeanTime(isoString) {
 }
 
 L.Control.infoButton = L.Control.extend({
-	options: { position: "bottomleft" },
+	options: { position: "bottomright" },
 	onAdd: function() {
 		const container = L.DomUtil.create("div", "leaflet-bar info-button");
 		// a button, not an anchor: an href="#" would trip the hash change reload
@@ -935,7 +938,7 @@ map.addControl(new L.Control.infoButton());
 	const credits = document.createElement("p");
 	credits.className = "info-credits";
 	credits.innerHTML = 'Generated with <a href="https://github.com/L0laapk3/FactorioMaps" target="_blank" rel="noopener">FactorioMaps</a> by L0laapk3.<br>' +
-		'Factorio 2.1 port, mod overhaul and interface redesign by <strong>lordfiSh</strong> for Awesome Factorio Control Manager.<br>' +
+		'Factorio 2.1 port, mod overhaul and interface redesign by <a href="https://github.com/lordfiSh/FactorioMaps" target="_blank" rel="noopener">lordfiSh</a> for Awesome Factorio Control Manager.<br>' +
 		'Map viewer built on <a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a>. ' +
 		'Images compressed with <a href="https://github.com/mozilla/mozjpeg" target="_blank" rel="noopener">mozjpeg</a>.<br>' +
 		'<a href="https://www.factorio.com/" target="_blank" rel="noopener">Factorio</a> is a game by Wube Software.';

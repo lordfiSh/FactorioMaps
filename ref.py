@@ -16,9 +16,24 @@ outext = ".jpg"
 
 
 
+class OldTileUnusable(Exception):
+    """The previous snapshot's tile cannot be read, so there is nothing to
+    compare against. Deliberately distinct from the same failure on the newly
+    rendered tile, which is a real problem and still raises."""
+
+
 def test(paths):
     newImg = Image.open(paths[0], mode='r').convert("RGB")
-    oldImg = Image.open(paths[1], mode='r').convert("RGB")
+    try:
+        oldImg = Image.open(paths[1], mode='r').convert("RGB")
+    except OSError as e:
+        # Missing, zero length, not an image at all, or written short. A run
+        # killed between zoom.py writing a tile and compressing it leaves every
+        # one of these behind, and PIL reports them as FileNotFoundError,
+        # UnidentifiedImageError and a bare OSError respectively — all three
+        # OSError, all three meaning the same thing to a caller that only
+        # wanted something to diff against.
+        raise OldTileUnusable from e
     treshold = .03 * newImg.size[0]**2
     # jpeg artifacts always average out perfectly over 8x8 sections, we take advantage of that and scale down by 8 so we can compare compressed images with uncompressed images.
     size = (newImg.size[0] / 8, newImg.size[0] / 8)
@@ -32,8 +47,8 @@ def compare(path, basePath, new, progressQueue):
     testResult = False
     try:
         testResult = test((os.path.join(basePath, new, *path[1:]), os.path.join(basePath, *path).replace(ext, outext)))
-    except FileNotFoundError:
-        # No older tile to compare against, whatever the index said. The
+    except OldTileUnusable:
+        # Nothing readable to compare against, whatever the index said. The
         # answer to "did this change" is then the safe one: keep the new
         # tile. Raising instead costs the whole surface, because this runs
         # in a worker pool and the exception surfaces at .get().
@@ -52,7 +67,7 @@ def compareRenderbox(renderbox, basePath, new):
     testResult = False
     try:
         testResult = test((newPath, os.path.join(basePath, renderbox[1], renderbox[0]) + outext))
-    except FileNotFoundError:
+    except OldTileUnusable:
         # As above: keep what was just rendered rather than losing the pass.
         testResult = True
     except:

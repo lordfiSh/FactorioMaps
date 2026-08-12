@@ -11,6 +11,8 @@ click from the discussion saying *why*. Issue numbers refer to
 `updates.json` stays as it is: the game reads it to show the update notice, and
 it wants one line per change, not prose.
 
+## [5.0.3] — 2026-08-12
+
 ## [5.0.2] — 2026-08-12
 
 ### Changed

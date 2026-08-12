@@ -33,6 +33,10 @@ it wants one line per change, not prose.
 
 - **Link boxes pointing at another surface work again.** The click handler switched surface by reaching into the old radio-selector control's DOM, and that control was replaced by the surface panels in 5.0.0 — the variable holding it has been declared and never assigned since, so every such click threw. It also asked whether the target was a different surface *after* switching to it, so it would have taken the same-surface branch even had it got that far.
 
+- **Rendering a save again replaces its snapshot instead of adding another.** A snapshot was identified by the tick the mod read when it took over, which is not something a savegame carries: a client runs a varying handful of ticks between loading a save and the capture starting, so the same file arrived under a different tick every run. The collision guard saw a folder named for the same hour but a tick that did not match, concluded it was looking at a genuinely new snapshot, and wrote `187-1` beside `187`. Reported from a timeline holding four entries for one save, whose ticks were seconds apart. A save is now identified by what is inside it, so a re-render — after a crash, or from a scheduler that fired twice — rewrites the snapshot it belongs to.
+
+- **A stale chunk cache no longer gives every surface a snapshot of its own.** An existing entry could only ever be found through `chunkCache.json`. When that file was missing or out of step with `mapInfo.json` — a killed run, a moved output folder — an `--all-surfaces` capture appended one entry per surface, all claiming the same folder, and the tiles of each overwrote the last. `mapInfo.json` is now consulted directly.
+
 ## [5.0.2] — 2026-08-12
 
 ### Changed

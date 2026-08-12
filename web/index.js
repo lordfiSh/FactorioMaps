@@ -1,6 +1,7 @@
 "use strict";
 let DEBUG = false;
-const EXT = ".jpg";
+// mapInfo.js is loaded before this file. Older folders predate the field.
+const EXT = "." + ((mapInfo.options && mapInfo.options.tileFormat) || "jpg");
 
 
 
@@ -340,7 +341,7 @@ function updateRenderboxUrls() {
 				const z = Math.min(marker.link.zoom.max, Math.max(marker.link.zoom.min, map.getZoom() - marker.zOffset));
 				if (marker._lastZ != z) {
 					marker._lastZ = z;
-					marker.setUrl("Images/" + marker.link.path + "/" + marker.link.toSurface + "/" + (marker.link.daynight ? label.daytime : "day") + "/renderboxes/" + z + "/" + marker.link.filename + ".jpg");
+					marker.setUrl("Images/" + marker.link.path + "/" + marker.link.toSurface + "/" + (marker.link.daynight ? label.daytime : "day") + "/renderboxes/" + z + "/" + marker.link.filename + EXT);
 				}
 			}
 }

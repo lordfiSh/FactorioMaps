@@ -11,8 +11,9 @@ from progress import Progress
 
 
 
-ext = ".png"
-outext = ".jpg"
+from tileformat import DEFAULTFORMAT, SOURCEEXT, getFormat
+
+ext = SOURCEEXT
 
 
 
@@ -22,7 +23,7 @@ class OldTileUnusable(Exception):
     rendered tile, which is a real problem and still raises."""
 
 
-def test(paths):
+def test(paths, tileFormat):
     newImg = Image.open(paths[0], mode='r').convert("RGB")
     try:
         oldImg = Image.open(paths[1], mode='r').convert("RGB")
@@ -34,8 +35,13 @@ def test(paths):
         # OSError, all three meaning the same thing to a caller that only
         # wanted something to diff against.
         raise OldTileUnusable from e
-    treshold = .03 * newImg.size[0]**2
-    # jpeg artifacts always average out perfectly over 8x8 sections, we take advantage of that and scale down by 8 so we can compare compressed images with uncompressed images.
+    treshold = tileFormat.compareThreshold * newImg.size[0]**2
+    # The new tile is still an uncompressed screenshot and the old one is not, so
+    # this has to see past whatever the codec did. Scaling down by 8 averages
+    # jpeg's 8x8 quantisation error away almost exactly. webp is VP8 intra, whose
+    # error is neither confined to that grid nor spread evenly by the deblocking
+    # filter, so it survives the downscale better and needs a higher threshold —
+    # hence compareThreshold living on the format rather than being a constant.
     size = (newImg.size[0] / 8, newImg.size[0] / 8)
     newImg.thumbnail(size, Image.BILINEAR)
     oldImg.thumbnail(size, Image.BILINEAR)
@@ -43,10 +49,10 @@ def test(paths):
     return sum(ImageStat.Stat(diff).sum2) > treshold
 
 
-def compare(path, basePath, new, progressQueue):
+def compare(path, basePath, new, tileFormat, progressQueue):
     testResult = False
     try:
-        testResult = test((os.path.join(basePath, new, *path[1:]), os.path.join(basePath, *path).replace(ext, outext)))
+        testResult = test((os.path.join(basePath, new, *path[1:]), os.path.splitext(os.path.join(basePath, *path))[0] + tileFormat.ext), tileFormat)
     except OldTileUnusable:
         # Nothing readable to compare against, whatever the index said. The
         # answer to "did this change" is then the safe one: keep the new
@@ -62,11 +68,11 @@ def compare(path, basePath, new, progressQueue):
         progressQueue.put(True, True)
     return (testResult, path[1:])
 
-def compareRenderbox(renderbox, basePath, new):
+def compareRenderbox(renderbox, basePath, new, tileFormat):
     newPath = os.path.join(basePath, new, renderbox[0]) + ext
     testResult = False
     try:
-        testResult = test((newPath, os.path.join(basePath, renderbox[1], renderbox[0]) + outext))
+        testResult = test((newPath, os.path.join(basePath, renderbox[1], renderbox[0]) + tileFormat.ext), tileFormat)
     except OldTileUnusable:
         # As above: keep what was just rendered rather than losing the pass.
         testResult = True
@@ -132,6 +138,8 @@ def ref(
 ):
 
     psutil.Process(os.getpid()).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if os.name == 'nt' else 10)
+
+    tileFormat = getFormat(getattr(args, "tile_format", None) or DEFAULTFORMAT)
 
     workFolder = basepath if basepath else Path(__file__, "..", "..", "..", "script-output", "FactorioMaps").resolve()
     topPath = Path(workFolder, outFolder)
@@ -241,7 +249,7 @@ def ref(
                                     # comparison against a file nothing ever wrote — which
                                     # raised out of the worker pool and took the whole
                                     # surface's cross-referencing with it.
-                                    compressed = y.replace(ext, outext)
+                                    compressed = os.path.splitext(y)[0] + tileFormat.ext
                                     if compressed in names:
                                         oldImages[(x, compressed)] = data["maps"][old]["path"]
 
@@ -262,10 +270,10 @@ def ref(
                     path = os.path.join(topPath, "Images", newMap["path"], surfaceName, daytime, str(z))
                     for x in os.listdir(path):
                         for y in os.listdir(os.path.join(path, x)):
-                            if (x, os.path.splitext(y)[0]) in dayImages or (x, y.replace(ext, outext)) not in oldImages:
+                            if (x, os.path.splitext(y)[0]) in dayImages or (x, os.path.splitext(y)[0] + tileFormat.ext) not in oldImages:
                                 keepList.append((surfaceName, daytime, str(z), x, y))
-                            elif (x, y.replace(ext, outext)) in oldImages:
-                                compareList.append((oldImages[(x, y.replace(ext, outext))], surfaceName, daytime, str(z), x, y))
+                            elif (x, os.path.splitext(y)[0] + tileFormat.ext) in oldImages:
+                                compareList.append((oldImages[(x, os.path.splitext(y)[0] + tileFormat.ext)], surfaceName, daytime, str(z), x, y))
 
 
 
@@ -282,7 +290,7 @@ def ref(
             m = mp.Manager()
             progressQueue = m.Queue()
             #compare(compareList[0], treshold=treshold, basePath=os.path.join(topPath, "Images"), new=str(newMap["path"]), progressQueue=progressQueue)
-            workers = pool.map_async(partial(compare, basePath=os.path.join(topPath, "Images"), new=str(newMap["path"]), progressQueue=progressQueue), compareList, 128)
+            workers = pool.map_async(partial(compare, basePath=os.path.join(topPath, "Images"), new=str(newMap["path"]), tileFormat=tileFormat, progressQueue=progressQueue), compareList, 128)
             doneSize = 0
             bar = Progress("ref ")
             for i in range(len(compareList)):
@@ -385,7 +393,7 @@ def ref(
 
 
             compareList = compareList.values()
-            resultList = pool.map(partial(compareRenderbox, basePath=os.path.join(topPath, "Images"), new=str(newMap["path"])), compareList, 16)
+            resultList = pool.map(partial(compareRenderbox, basePath=os.path.join(topPath, "Images"), new=str(newMap["path"]), tileFormat=tileFormat), compareList, 16)
 
             count = 0
             for (isDifferent, path, oldPath, links) in resultList:

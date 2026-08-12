@@ -13,15 +13,17 @@ it wants one line per change, not prose.
 
 ## [5.0.2] — 2026-08-12
 
+### Changed
+
+- **The info button moved to the bottom right corner, and the attribution bar is gone.** The strip reading "Leaflet | FactorioMaps" sat in that corner doing nothing a reader wanted; the credits it carried were already in the info panel, which names and links FactorioMaps, Leaflet, mozjpeg and Factorio, and now links this fork beside the line describing what it changed. (#6)
+
 ### Fixed
 
 - **A render that was killed no longer breaks the renders after it — this time in the shipped build.** The guard was written for 5.0.1 and its changelog entry went out with it, but the commit carrying the code stayed behind on `factorio-2.1`, so every published image up to now indexed compressed tiles that were never written and lost a surface's whole cross-referencing pass to `FileNotFoundError`. (#7)
 
+- **The full screen button appears on the map again.** `leaflet.fullscreen` puts its button inside the zoom control's container unless `forceSeparateButton` says otherwise, and the viewer moves the zoom control to the other corner on the following line — which rebuilds that container and drops the button with it. Nobody had a full screen button since the control was first added, on either the old plugin or the new one. (#6)
+
 ## [5.0.1] — 2026-08-11
-
-### Changed
-
-- **The info button moved to the bottom right corner, and the attribution bar is gone.** The strip reading "Leaflet | FactorioMaps" sat in that corner doing nothing a reader wanted; the credits it carried were already in the info panel, which names and links FactorioMaps, Leaflet, mozjpeg and Factorio, and now links this fork beside the line describing what it changed. (#6)
 
 ### Fixed
 
@@ -39,8 +41,6 @@ it wants one line per change, not prose.
   pointing at a jpg nothing ever wrote, and the comparison it scheduled raised `FileNotFoundError`
   out of the worker pool, losing that surface's whole cross-referencing pass. Reported from a
   sixteen-surface Space Age map that printed pages of these on every run. (#4)
-
-- **The full screen button appears on the map again.** `leaflet.fullscreen` puts its button inside the zoom control's container unless `forceSeparateButton` says otherwise, and the viewer moves the zoom control to the other corner on the following line — which rebuilds that container and drops the button with it. Nobody had a full screen button since the control was first added, on either the old plugin or the new one. (#6)
 
 ## [5.0.0] — 2026-08-11
 

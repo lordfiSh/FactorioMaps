@@ -22,6 +22,14 @@ it wants one line per change, not prose.
   was discarded each time. A render generally escaped it, because the caller
   usually mounts a staging directory that already has `config/` in it.
 
+- **A render that was killed no longer breaks every render after it.** `ref.py` indexes what the
+  previous snapshot holds by listing its directories and renaming `.png` to `.jpg`, which assumes
+  every name in there has a compressed tile beside it. A snapshot whose run was killed between
+  `zoom.py` writing a png and compressing it does not — so each leftover became an index entry
+  pointing at a jpg nothing ever wrote, and the comparison it scheduled raised `FileNotFoundError`
+  out of the worker pool, losing that surface's whole cross-referencing pass. Reported from a
+  sixteen-surface Space Age map that printed pages of these on every run. (#4)
+
 ## [5.0.0] — 2026-08-11
 
 ### Added

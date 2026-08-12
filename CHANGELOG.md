@@ -11,6 +11,20 @@ click from the discussion saying *why*. Issue numbers refer to
 `updates.json` stays as it is: the game reads it to show the update notice, and
 it wants one line per change, not prose.
 
+## [5.0.4] — 2026-08-12
+
+### Fixed
+
+- **Switching planet or platform lands somewhere you can see it.** The viewer swapped which tile layers were on the map and left the centre and zoom exactly where the last surface had them. A space platform is a few chunks wide, parked somewhere else entirely, and its tiles start several zoom levels above a charted planet's — so arriving from Nauvis put you outside the platform's extent and below the zoom its tiles exist at, and Leaflet drew nothing. The view now recentres on the surface being opened and keeps the zoom only where that surface has tiles for it. (#15)
+
+- **A link naming a surface and a zoom but no position opens on that surface.** `#1/platform-7/18` fell back to arithmetic on the spawn point that divided by `2**(zoom-1)` where the rest of the viewer divides by `COORDSCALE`; the two agree only at zoom 16 on a display with no pixel scaling, so anywhere else the map opened a factor of two off per level, twice over on a HiDPI screen. (#15)
+
+- **Link boxes pointing at another surface work again.** The click handler switched surface by reaching into the old radio-selector control's DOM, and that control was replaced by the surface panels in 5.0.0 — the variable holding it has been declared and never assigned since, so every such click threw. It also asked whether the target was a different surface *after* switching to it, so it would have taken the same-surface branch even had it got that far. (#15)
+
+- **Rendering a save again replaces its snapshot instead of adding another.** A snapshot was identified by the tick the mod read when it took over, which is not something a savegame carries: a client runs a varying handful of ticks between loading a save and the capture starting, so the same file arrived under a different tick every run. The collision guard saw a folder named for the same hour but a tick that did not match, concluded it was looking at a genuinely new snapshot, and wrote `187-1` beside `187`. Reported from a timeline holding four entries for one save, whose ticks were seconds apart. A save is now identified by what is inside it, so a re-render — after a crash, or from a scheduler that fired twice — rewrites the snapshot it belongs to. (#16)
+
+- **A stale chunk cache no longer gives every surface a snapshot of its own.** An existing entry could only ever be found through `chunkCache.json`. When that file was missing or out of step with `mapInfo.json` — a killed run, a moved output folder — an `--all-surfaces` capture appended one entry per surface, all claiming the same folder, and the tiles of each overwrote the last. `mapInfo.json` is now consulted directly. (#16)
+
 ## [5.0.3] — 2026-08-12
 
 ### Added
@@ -26,16 +40,6 @@ it wants one line per change, not prose.
 - **A snapshot holding a damaged tile no longer costs the whole cross-referencing pass.** 5.0.2 taught `ref.py` to shrug off an index entry pointing at a tile that was never written, but a run killed while compressing leaves zero length and half written tiles as well, and those raise `UnidentifiedImageError` and a bare `OSError` instead of `FileNotFoundError`. Both escaped the guard and surfaced out of the worker pool, losing the surface. Any old tile that cannot be read is now treated as nothing to compare against; the newly rendered tile still raises if it is the broken one. (#9)
 
 - **A render no longer depends on a CDN being reachable.** The viewer's javascript and css were fetched on every run, outside any `try` and unaffected by `--no-update`, so a momentary failure at jsdelivr ended the render before Factorio started — after the caller had potentially already waited out a client download. They are fetched when the image is built now, and a run that still needs them falls back to whatever is already on disk. This also removes a write into a directory that is read-only for the unprivileged user the container is documented to run as. (#10)
-
-- **Switching planet or platform lands somewhere you can see it.** The viewer swapped which tile layers were on the map and left the centre and zoom exactly where the last surface had them. A space platform is a few chunks wide, parked somewhere else entirely, and its tiles start several zoom levels above a charted planet's — so arriving from Nauvis put you outside the platform's extent and below the zoom its tiles exist at, and Leaflet drew nothing. The view now recentres on the surface being opened and keeps the zoom only where that surface has tiles for it.
-
-- **A link naming a surface and a zoom but no position opens on that surface.** `#1/platform-7/18` fell back to arithmetic on the spawn point that divided by `2**(zoom-1)` where the rest of the viewer divides by `COORDSCALE`; the two agree only at zoom 16 on a display with no pixel scaling, so anywhere else the map opened a factor of two off per level, twice over on a HiDPI screen.
-
-- **Link boxes pointing at another surface work again.** The click handler switched surface by reaching into the old radio-selector control's DOM, and that control was replaced by the surface panels in 5.0.0 — the variable holding it has been declared and never assigned since, so every such click threw. It also asked whether the target was a different surface *after* switching to it, so it would have taken the same-surface branch even had it got that far.
-
-- **Rendering a save again replaces its snapshot instead of adding another.** A snapshot was identified by the tick the mod read when it took over, which is not something a savegame carries: a client runs a varying handful of ticks between loading a save and the capture starting, so the same file arrived under a different tick every run. The collision guard saw a folder named for the same hour but a tick that did not match, concluded it was looking at a genuinely new snapshot, and wrote `187-1` beside `187`. Reported from a timeline holding four entries for one save, whose ticks were seconds apart. A save is now identified by what is inside it, so a re-render — after a crash, or from a scheduler that fired twice — rewrites the snapshot it belongs to.
-
-- **A stale chunk cache no longer gives every surface a snapshot of its own.** An existing entry could only ever be found through `chunkCache.json`. When that file was missing or out of step with `mapInfo.json` — a killed run, a moved output folder — an `--all-surfaces` capture appended one entry per surface, all claiming the same folder, and the tiles of each overwrote the last. `mapInfo.json` is now consulted directly.
 
 ## [5.0.2] — 2026-08-12
 

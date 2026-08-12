@@ -5,13 +5,13 @@ from urllib.parse import urlparse
 from urllib.request import build_opener, install_opener, urlretrieve
 
 URLLIST = (
-	"https://cdn.jsdelivr.net/npm/leaflet@1.6.0/dist/leaflet.css",
-	"https://cdn.jsdelivr.net/npm/leaflet@1.6.0/dist/leaflet-src.min.js",
-	"https://cdn.jsdelivr.net/npm/leaflet.fullscreen@1.4.5/Control.FullScreen.css",
-	"https://cdn.jsdelivr.net/npm/leaflet.fullscreen@1.4.5/Control.FullScreen.min.js",
-	"https://cdn.jsdelivr.net/npm/jquery@3.4.1/dist/jquery.min.js",
-	"https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/themes/smoothness/jquery-ui.css",
-	"https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js",
+	"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css",
+	"https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js",
+	"https://cdn.jsdelivr.net/npm/leaflet.fullscreen@5.3.3/dist/Control.FullScreen.css",
+	"https://cdn.jsdelivr.net/npm/leaflet.fullscreen@5.3.3/dist/Control.FullScreen.umd.js",
+	"https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js",
+	"https://cdn.jsdelivr.net/npm/jquery-ui@1.14.2/dist/themes/smoothness/jquery-ui.css",
+	"https://cdn.jsdelivr.net/npm/jquery-ui@1.14.2/dist/jquery-ui.min.js",
 	"https://cdn.jsdelivr.net/gh/L0laapk3/Leaflet.OpacityControls@2/Control.Opacity.css",
 	"https://cdn.jsdelivr.net/gh/L0laapk3/Leaflet.OpacityControls@2/Control.Opacity.js",
 	"https://cdn.jsdelivr.net/npm/js-natural-sort@0.8.1/dist/naturalsort.min.js",
@@ -19,7 +19,7 @@ URLLIST = (
 )
 
 
-CURRENTVERSION = 4
+CURRENTVERSION = 5
 
 
 def update(Force=True):

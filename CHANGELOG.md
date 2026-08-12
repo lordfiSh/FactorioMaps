@@ -13,6 +13,10 @@ it wants one line per change, not prose.
 
 ## [5.0.2] — 2026-08-12
 
+### Fixed
+
+- **A render that was killed no longer breaks the renders after it — this time in the shipped build.** The guard was written for 5.0.1 and its changelog entry went out with it, but the commit carrying the code stayed behind on `factorio-2.1`, so every published image up to now indexed compressed tiles that were never written and lost a surface's whole cross-referencing pass to `FileNotFoundError`. (#7)
+
 ## [5.0.1] — 2026-08-11
 
 ### Changed

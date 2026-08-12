@@ -1,11 +1,23 @@
 name: docker image
 
+# A push to master or a release tag always builds, because that is what gets
+# published. A pull request only builds when it touches something the image is
+# made of — which is a small minority of them, and the rest were paying four
+# and a half minutes of runner time for two architectures to prove that files
+# they did not change still build. Everything else is checked in ci.yml.
 on:
   push:
     branches: [master]
     tags: ["v*"]
   pull_request:
     branches: [master]
+    paths:
+      - "docker/**"
+      - "requirements.txt"
+      - "mozjpeg/**"
+      - "updateLib.py"          # runs during the build, so it can break it
+      - ".dockerignore"
+      - ".github/workflows/docker.yml"
   workflow_dispatch:
 
 env:
@@ -13,39 +25,11 @@ env:
   IMAGE: ghcr.io/lordfish/factoriomaps
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Byte compile the python
-        run: python -m compileall -q auto.py crop.py ref.py zoom.py progress.py updateLib.py makeZip.py
-
-      - name: Check the shell scripts
-        run: bash -n docker/entrypoint.sh
-
-      - name: Check the web sources
-        run: |
-          node --check web/index.js
-          python -c "import json; json.load(open('info.json')); json.load(open('updates.json'))"
-
-      - name: Dependencies must resolve
-        # PyTurboJPEG 2.0 dropped libjpeg-turbo 2.x, which is what mozjpeg/ ships,
-        # so an unpinned install silently breaks every run. Catch that here.
-        run: |
-          pip install -r requirements.txt
-          python -c "import turbojpeg, PIL, numpy, psutil; print('dependencies ok')"
-
   # Built on the architecture it targets rather than through emulation: the
   # image compiles wheels and installs a lot of apt, and qemu makes that
   # painfully slow. Each arch is smoke tested where it was built, which is how
   # the arm64 VirtualGL package mismatch surfaced in the first place.
   image:
-    needs: checks
     strategy:
       fail-fast: false
       matrix:

@@ -1,0 +1,51 @@
+name: checks
+
+# Everything here finishes in well under a minute, so it runs on everything.
+# Building the image is what costs real time, and that lives in docker.yml
+# behind a path filter.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Byte compile the python
+        # every top level module, so a new one is covered without editing this
+        run: python -m compileall -q *.py
+
+      - name: Check the shell scripts
+        run: bash -n docker/entrypoint.sh
+
+      - name: Check the web sources
+        run: |
+          node --check web/index.js
+          python -c "import json; json.load(open('info.json')); json.load(open('updates.json'))"
+
+      - name: Dependencies must resolve
+        # PyTurboJPEG 2.0 dropped libjpeg-turbo 2.x, which is what mozjpeg/ ships,
+        # so an unpinned install silently breaks every run. Catch that here.
+        run: |
+          pip install -r requirements.txt
+          python -c "import turbojpeg, PIL, numpy, psutil; print('dependencies ok')"
+
+      - name: The modules must import
+        # Byte compiling proves each file parses; it does not prove they still
+        # fit together. A module that moved, or a name that did not move with
+        # it, only shows up on import — and the smoke test that used to catch
+        # that now runs on far fewer pull requests, so it is caught here.
+        # zoom imports libturbojpeg at module level and the bundled build is
+        # x86-64, which is what this runner is.
+        run: python -c "import auto, crop, ref, zoom, progress, updateLib; print('imports ok')"

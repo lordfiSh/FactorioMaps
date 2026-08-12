@@ -71,8 +71,13 @@ Heres a list of flags that `auto.py` can accept:
 | `--dry` | Skips starting factorio, making screenshots and doing the main steps, only execute setting up and finishing of script. |
 | `--force-lib-update` | Forces an update of the web dependencies. |
 | `--temp-dir` | Use a custom temporary directory. |
+| `--quality=N` | jpeg quality of the generated tiles, 1 to 100. Defaults to 80. |
+| `--no-compress` | Write tiles without compressing them, for postprocessing them yourself. |
 
-Image quality settings can be changed in the top of `zoom.py`.
+Quality is per snapshot. Tiles already in an output folder keep the quality they
+were written at, and a folder holding snapshots written at different qualities is
+fine — the cross-referencing step compares against an uncompressed screenshot, so
+it is unaffected.
 
 # Result folder estimates
 You can expect the resulting folders to take up approx. (very rough estimate) 15 times the savefile size per timestamp per daytime for day images and 10 times for night images. The intermediate total disk usage will be much higher, 10 times the final result or more. If this is a problem for you, go put a +1 on [#46](https://github.com/L0laapk3/FactorioMaps/issues/46).

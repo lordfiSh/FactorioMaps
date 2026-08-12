@@ -2,10 +2,10 @@ name: docker image
 
 on:
   push:
-    branches: [master, factorio-2.1]
+    branches: [master]
     tags: ["v*"]
   pull_request:
-    branches: [master, factorio-2.1]
+    branches: [master]
   workflow_dispatch:
 
 env:

@@ -71,8 +71,15 @@ Heres a list of flags that `auto.py` can accept:
 | `--dry` | Skips starting factorio, making screenshots and doing the main steps, only execute setting up and finishing of script. |
 | `--force-lib-update` | Forces an update of the web dependencies. |
 | `--temp-dir` | Use a custom temporary directory. |
+| `--max-zoom=N` | Deepest zoom level to capture: 19, 20 (default) or 21. |
 | `--quality=N` | jpeg quality of the generated tiles, 1 to 100. Defaults to 80. |
 | `--no-compress` | Write tiles without compressing them, for postprocessing them yourself. |
+
+`--max-zoom` is what sets the screenshot resolution — 19 is 16 pixels per in-game
+tile, 20 is 32, 21 is 64 (which is what `--hd` means). Each level down is a
+quarter of the tiles and roughly a quarter of the disk, at half the detail. It is
+fixed for an output folder by its first snapshot, and 19 is the floor: below it an
+image would span more than one chunk, which the charted-chunk scan cannot express.
 
 Quality is per snapshot. Tiles already in an output folder keep the quality they
 were written at, and a folder holding snapshots written at different qualities is

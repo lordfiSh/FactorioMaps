@@ -66,10 +66,18 @@ function fm.generateMap(data)
 
 	local tilesPerChunk = 32    --hardcoded
 	
-	local pixelsPerTile = 32
-	if fm.autorun.mapInfo.options.HD then
-		pixelsPerTile = 64   -- HD textures have 64 pixels/tile
+	-- maxZoom only names the deepest directory; what sets the density is
+	-- pixelsPerTile, and the two always move together. 2^maxZoom / pixelsPerTile
+	-- is invariant at 2^15, which is why one game tile lands on the same leaflet
+	-- coordinate at every setting and web/index.js can hardcode COORDSCALE.
+	-- 19 is the floor: gridPixelSize is then 32, exactly one chunk, and the
+	-- charted scan below still enumerates one image per chunk. At 18 it would be
+	-- 64 and those loop bounds turn fractional.
+	local maxZoom = fm.autorun.mapInfo.options.maxZoom
+	if maxZoom == nil then
+		maxZoom = fm.autorun.mapInfo.options.HD and 21 or 20
 	end
+	local pixelsPerTile = math.floor(2 ^ (maxZoom - 15) + 0.5)
 
 	-- These are the number of tiles per image (gridSize = 512, 32 pixelspertile means 16 by 16 tiles in each image)
 	local gridPixelSize = gridSize / pixelsPerTile
@@ -456,10 +464,6 @@ function fm.generateMap(data)
 	end
 	
 
-	local maxZoom = 20
-	if fm.autorun.mapInfo.options.HD then
-		maxZoom = 21
-	end
 
 	if mapIndex == 0 then
 
@@ -605,7 +609,7 @@ function fm.generateMap(data)
 			surface = surface,
 			position = {(box[1] + box[3]) / 2, (box[2] + box[4]) / 2},
 			resolution = {(box[3] - box[1])*pixelsPerTile, (box[4] - box[2])*pixelsPerTile},
-			zoom = fm.autorun.mapInfo.options.HD and 2 or 1,
+			zoom = pixelsPerTile / 32,
 			path = basePath .. "Images/" .. path,
 			show_entity_info = fm.autorun.alt_mode,
 			hide_clouds = true,

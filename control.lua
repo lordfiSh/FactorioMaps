@@ -55,6 +55,7 @@ script.on_event(defines.events.on_tick, function(event)
 					},
 					HD = fm.autorun.HD,
 					maxZoom = fm.autorun.maxZoom,
+					tileFormat = fm.autorun.tileFormat,
 					day = fm.autorun.day,
 					night = fm.autorun.night,
 				}

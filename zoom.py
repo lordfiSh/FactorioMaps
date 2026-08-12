@@ -14,12 +14,9 @@ from PIL import Image
 from turbojpeg import TurboJPEG
 
 from progress import Progress
+from tileformat import DEFAULTFORMAT, FORMATS, SOURCEEXT, THUMBNAILEXT, getFormat
 
-DEFAULTQUALITY = 80
-
-EXT = ".png"
-OUTEXT = ".jpg"     		# format='JPEG' is hardcoded in places, meed to modify those, too. Most parameters are not supported outside jpeg.
-THUMBNAILEXT = ".png"
+EXT = SOURCEEXT
 
 BACKGROUNDCOLOR = (27, 45, 51)
 THUMBNAILSCALE = 2
@@ -76,12 +73,15 @@ jpeg = loadTurboJpeg()
 # inherited in the first case and silently reset to its default in the second —
 # producing a valid jpeg at the wrong size, on some platforms only. Encode
 # settings therefore travel in the pickled arguments, never as global state.
-EncodeSettings = namedtuple("EncodeSettings", ("quality", "noCompress"))
+EncodeSettings = namedtuple("EncodeSettings", ("format", "quality", "noCompress"))
 
 
 def encodeSettings(args: Namespace):
+    tileFormat = getFormat(getattr(args, "tile_format", None) or DEFAULTFORMAT)
+    quality = getattr(args, "quality", None)
     return EncodeSettings(
-        quality=getattr(args, "quality", DEFAULTQUALITY),
+        format=tileFormat,
+        quality=tileFormat.defaultQuality if quality is None else quality,
         noCompress=getattr(args, "no_compress", False),
     )
 
@@ -90,6 +90,13 @@ def saveCompress(img, path: Path, settings: EncodeSettings):
     if settings.noCompress:  # do not waste any time compressing the image
         return img.save(path, subsampling=0, quality=100)
 
+    if settings.format.name == "webp":
+        # method 4 is pillow's default and the measured sweet spot: method 6 is
+        # three times slower for a percent or so, method 0 is faster than jpeg
+        # but gives most of the size back.
+        return img.save(path, format="WEBP", quality=settings.quality, method=4)
+
+    # the reversal is pillow RGB to turbojpeg's default BGR
     outFile = path.open("wb")
     outFile.write(jpeg.encode(numpy.array(img)[:, :, ::-1].copy(), quality=settings.quality))
     outFile.close()
@@ -99,8 +106,8 @@ def simpleZoom(workQueue, settings: EncodeSettings):
     for (folder, start, stop, filename) in workQueue:
         path = Path(folder, str(start), filename)
         img = Image.open(path.with_suffix(EXT), mode="r").convert("RGB")
-        if OUTEXT != EXT:
-            saveCompress(img, path.with_suffix(OUTEXT), settings)
+        if settings.format.ext != EXT:
+            saveCompress(img, path.with_suffix(settings.format.ext), settings)
             path.with_suffix(EXT).unlink()
 
         for z in range(start - 1, stop - 1, -1):
@@ -109,7 +116,7 @@ def simpleZoom(workQueue, settings: EncodeSettings):
             zFolder = Path(folder, str(z))
             if not zFolder.exists():
                 zFolder.mkdir(parents=True)
-            saveCompress(img, Path(zFolder, filename).with_suffix(OUTEXT), settings)
+            saveCompress(img, Path(zFolder, filename).with_suffix(settings.format.ext), settings)
 
 
 def zoomRenderboxes(daytimeSurfaces, toppath, timestamp, subpath, args):
@@ -240,7 +247,7 @@ def work(basepath, pathList, surfaceName, daytime, size, start, stop, last, chun
                             isOriginal.append(paths[m].is_file())
                             if not isOriginal[m]:
                                 for n in range(1, len(pathList)):
-                                    paths[m] = Path(basepath, pathList[n], surfaceName, daytime, str(k), str(i + coords[m][0]), str(j + coords[m][1])).with_suffix(OUTEXT)
+                                    paths[m] = Path(basepath, pathList[n], surfaceName, daytime, str(k), str(i + coords[m][0]), str(j + coords[m][1])).with_suffix(settings.format.ext)
                                     if paths[m].is_file():
                                         break
 
@@ -264,20 +271,20 @@ def work(basepath, pathList, surfaceName, daytime, size, start, stop, last, chun
                                     images.append((img, paths[m]))
 
                         if k == last + 1:
-                            saveCompress(result, Path(basepath, pathList[0], surfaceName, daytime, str(k - 1), str(i // 2), str(j // 2)).with_suffix(OUTEXT), settings)
-                        if OUTEXT != EXT and (k != last + 1 or keepLast):
+                            saveCompress(result, Path(basepath, pathList[0], surfaceName, daytime, str(k - 1), str(i // 2), str(j // 2)).with_suffix(settings.format.ext), settings)
+                        if settings.format.ext != EXT and (k != last + 1 or keepLast):
                             result.save(Path(basepath, pathList[0], surfaceName, daytime, str(k - 1), str(i // 2), str(j // 2), ).with_suffix(EXT))
 
-                        if OUTEXT != EXT:
+                        if settings.format.ext != EXT:
                             for img, path in images:
-                                saveCompress(img, path.with_suffix(OUTEXT), settings)
+                                saveCompress(img, path.with_suffix(settings.format.ext), settings)
                                 path.unlink()
 
             chunksize = chunksize // 2
     elif stop == last:
         path = Path(basepath, pathList[0], surfaceName, daytime, str(start), str(chunk[0]), str(chunk[1]))
         img = Image.open(path.with_suffix(EXT), mode="r").convert("RGB")
-        saveCompress(img, path.with_suffix(OUTEXT), settings)
+        saveCompress(img, path.with_suffix(settings.format.ext), settings)
         path.with_suffix(EXT).unlink()
 
 
@@ -307,6 +314,8 @@ def zoom(
 ):
 
     psutil.Process(os.getpid()).nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if os.name == "nt" else 10)
+
+    settings = encodeSettings(args)
 
     workFolder = basepath if basepath else Path(__file__, "..", "..", "..", "script-output", "FactorioMaps").resolve()
 
@@ -403,7 +412,7 @@ def zoom(
                                 for _ in range(0, threads):
                                     p = mp.Process(
                                         target=thread,
-                                        kwargs={"settings": encodeSettings(args)},
+                                        kwargs={"settings": settings},
                                         args=(
                                             imagePath,
                                             pathList,
@@ -438,7 +447,7 @@ def zoom(
                                     for chunk in list(allBigChunks):
                                         p = mp.Process(
                                             target=work,
-                                            kwargs={"settings": encodeSettings(args)},
+                                            kwargs={"settings": settings},
                                             args=(
                                                 imagePath,
                                                 pathList,
@@ -495,7 +504,7 @@ def zoom(
                                             .resize((imageSize, imageSize), Image.Resampling.LANCZOS),
                                         )
 
-                                        if OUTEXT != EXT:
+                                        if settings.format.ext != EXT:
                                             path.unlink()
 
                                     thumbnail.save(Path(imagePath, "thumbnail" + THUMBNAILEXT))

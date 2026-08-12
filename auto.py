@@ -48,7 +48,8 @@ from PIL import Image, ImageChops
 from crop import crop
 from ref import ref
 from updateLib import update as updateLib
-from zoom import DEFAULTQUALITY, zoom, zoomRenderboxes
+from tileformat import DEFAULTFORMAT, FORMATS
+from zoom import zoom, zoomRenderboxes
 
 def findUserFolder():
     # explicit wins, for containers and other unusual layouts
@@ -342,6 +343,7 @@ def buildAutorun(args: Namespace, workFolder: Path, outFolder: Path, isFirstSnap
             f'''fm.autorun = {{
             HD = {lowerBool(args.hd)},
             maxZoom = {args.max_zoom if args.max_zoom else "nil"},
+            tileFormat = "{args.tile_format or DEFAULTFORMAT}",
             daytime = "{daytime}",
             alt_mode = {lowerBool(args.altmode)},
             tags = {lowerBool(args.tags)},
@@ -439,7 +441,8 @@ def auto(*args):
     daytime.add_argument("--nightonly", dest="day", action="store_false", help="Only take nighttime screenshots.")
     parser.add_argument("--hd", action="store_true", help="Take screenshots of resolution 64 x 64 pixels per in-game tile. Equivalent to --max-zoom 21.")
     parser.add_argument("--max-zoom", dest="max_zoom", type=int, choices=(19, 20, 21), default=None, help="Deepest zoom level to capture, which is what sets the screenshot resolution: 19 is 16 pixels per in-game tile, 20 (the default) is 32, 21 is 64. Each level down is a quarter of the tiles and roughly a quarter of the disk, at half the detail. Fixed for an output folder by its first snapshot.")
-    parser.add_argument("--quality", type=qualityArg, default=DEFAULTQUALITY, help=f"jpeg quality of the generated tiles, 1 to 100. Defaults to {DEFAULTQUALITY}. This is per snapshot: tiles already in the output folder keep the quality they were written at, and mixing them is fine.")
+    parser.add_argument("--quality", type=qualityArg, default=None, help="Quality of the generated tiles, 1 to 100. Defaults to " + ", ".join(f"{f.defaultQuality} for {n}" for n, f in FORMATS.items()) + " — the scales are per codec and not comparable. This is per snapshot: tiles already in the output folder keep the quality they were written at, and mixing them is fine.")
+    parser.add_argument("--tile-format", dest="tile_format", choices=tuple(FORMATS), default=None, help=f"Format the tiles are written in. Defaults to {DEFAULTFORMAT}. webp is around a quarter smaller at the same quality and encodes faster, but is fixed for an output folder by its first snapshot: tiles the cross-referencing step reuses come from earlier snapshots, so one folder cannot hold two formats.")
     parser.add_argument("--no-compress", dest="no_compress", action="store_true", help="Write tiles at maximum quality without compressing them, for when you want to postprocess them yourself. Ignores --quality and produces much larger files.")
     parser.add_argument("--no-altmode", dest="altmode", action="store_false", help="Hides entity info (alt mode).")
     parser.add_argument("--no-tags", dest="tags", action="store_false", help="Hides map tags")
@@ -481,6 +484,11 @@ def auto(*args):
     elif args.hd and args.max_zoom != 21:
         parser.error(f"--hd is --max-zoom 21, which contradicts --max-zoom {args.max_zoom}")
     args.hd = args.max_zoom == 21
+
+    if args.tile_format == "webp":
+        from PIL import features
+        if not features.check("webp"):
+            parser.error("this Pillow has no webp support; reinstall it (pip install --force-reinstall Pillow) or use --tile-format jpg")
 
     if args.verbose > 0:
         print(args)
@@ -587,6 +595,27 @@ def auto(*args):
         workfolder.mkdir(parents=True, exist_ok=True)
     except FileExistsError:
         raise Exception(f"{workfolder} exists and is not a directory!")
+
+    # The format cannot change under an existing folder. Cross-referencing reuses
+    # tiles from earlier snapshots and the viewer serves them from those older
+    # directories, so one folder is one format — and re-encoding the old ones is
+    # not an option, because zoom.py deletes the source screenshots once they are
+    # compressed and the saves they came from may no longer exist.
+    existingInfo = Path(workfolder, "mapInfo.json")
+    if existingInfo.is_file():
+        try:
+            with existingInfo.open("r", encoding="utf-8") as f:
+                recorded = json.load(f).get("options", {}).get("tileFormat")
+        except (OSError, ValueError):
+            recorded = None
+        requested = args.tile_format or DEFAULTFORMAT
+        if recorded and recorded != requested:
+            raise Exception(
+                f"{workfolder} already holds {recorded} tiles, cannot add {requested} ones. "
+                f"Use --tile-format {recorded}, a different output folder, or --delete to start over."
+            )
+        if recorded and not args.tile_format:
+            args.tile_format = recorded
 
     # The docker image fetches these at build time, so normally there is nothing
     # to do here. When there is, a CDN that will not answer should not cost a

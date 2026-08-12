@@ -32,6 +32,12 @@ def compare(path, basePath, new, progressQueue):
     testResult = False
     try:
         testResult = test((os.path.join(basePath, new, *path[1:]), os.path.join(basePath, *path).replace(ext, outext)))
+    except FileNotFoundError:
+        # No older tile to compare against, whatever the index said. The
+        # answer to "did this change" is then the safe one: keep the new
+        # tile. Raising instead costs the whole surface, because this runs
+        # in a worker pool and the exception surfaces at .get().
+        testResult = True
     except:
         print("\r")
         traceback.print_exc()
@@ -46,6 +52,9 @@ def compareRenderbox(renderbox, basePath, new):
     testResult = False
     try:
         testResult = test((newPath, os.path.join(basePath, renderbox[1], renderbox[0]) + outext))
+    except FileNotFoundError:
+        # As above: keep what was just rendered rather than losing the pass.
+        testResult = True
     except:
         print("\r")
         raise
@@ -207,8 +216,19 @@ def ref(
                                 allImageIndex[surfaceName] = {}
                             path = os.path.join(topPath, "Images", data["maps"][old]["path"], surfaceName, daytime, str(z))
                             for x in os.listdir(path):
-                                for y in os.listdir(os.path.join(path, x)):
-                                    oldImages[(x, y.replace(ext, outext))] = data["maps"][old]["path"]
+                                names = set(os.listdir(os.path.join(path, x)))
+                                for y in names:
+                                    # What this indexes is the compressed tile, so a name is
+                                    # only worth indexing if that tile is really there. A
+                                    # snapshot whose run was killed between zoom.py writing
+                                    # the png and compressing it holds the png and nothing
+                                    # else, and taking its word for a jpg schedules a
+                                    # comparison against a file nothing ever wrote — which
+                                    # raised out of the worker pool and took the whole
+                                    # surface's cross-referencing with it.
+                                    compressed = y.replace(ext, outext)
+                                    if compressed in names:
+                                        oldImages[(x, compressed)] = data["maps"][old]["path"]
 
                     if daytime != "day":
                         if not os.path.isfile(os.path.join(topPath, "Images", newMap["path"], surfaceName, "day", "ref.txt")):

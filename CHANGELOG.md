@@ -13,6 +13,10 @@ it wants one line per change, not prose.
 
 ## [5.0.3] — 2026-08-12
 
+### Fixed
+
+- **A snapshot holding a damaged tile no longer costs the whole cross-referencing pass.** 5.0.2 taught `ref.py` to shrug off an index entry pointing at a tile that was never written, but a run killed while compressing leaves zero length and half written tiles as well, and those raise `UnidentifiedImageError` and a bare `OSError` instead of `FileNotFoundError`. Both escaped the guard and surfaced out of the worker pool, losing the surface. Any old tile that cannot be read is now treated as nothing to compare against; the newly rendered tile still raises if it is the broken one. (#9)
+
 ## [5.0.2] — 2026-08-12
 
 ### Changed

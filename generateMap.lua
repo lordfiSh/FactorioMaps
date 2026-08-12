@@ -465,11 +465,33 @@ function fm.generateMap(data)
 	
 
 
+	-- the lookup above only ever finds an entry through the chunk cache. When
+	-- that file is missing or out of step with mapInfo.json - a killed run, a
+	-- moved output folder - every surface of an --all-surfaces capture would
+	-- append its own entry. Ask mapInfo.json itself before writing a new one.
+	if mapIndex == 0 then
+		for i, map in pairs(fm.autorun.mapInfo.maps) do
+			local same
+			if fm.autorun.saveId and map.saveId then
+				same = map.saveId == fm.autorun.saveId
+			else
+				-- entries written before saves were identified carry no saveId,
+				-- and for those the tick is the best answer available
+				same = map.tick == fm.autorun.tick
+			end
+			if same then
+				mapIndex = i
+				break
+			end
+		end
+	end
+
 	if mapIndex == 0 then
 
 		mapIndex = #fm.autorun.mapInfo.maps + 1
 		fm.autorun.mapInfo.maps[mapIndex] = {
 			tick = fm.autorun.tick,
+			saveId = fm.autorun.saveId,
 			path = fm.autorun.filePath,
 			date = fm.autorun.date,
 			mods = script.active_mods,

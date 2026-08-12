@@ -341,6 +341,7 @@ def buildAutorun(args: Namespace, workFolder: Path, outFolder: Path, isFirstSnap
         autorunString = \
             f'''fm.autorun = {{
             HD = {lowerBool(args.hd)},
+            maxZoom = {args.max_zoom if args.max_zoom else "nil"},
             daytime = "{daytime}",
             alt_mode = {lowerBool(args.altmode)},
             tags = {lowerBool(args.tags)},
@@ -436,7 +437,8 @@ def auto(*args):
     daytime = parser.add_mutually_exclusive_group()
     daytime.add_argument("--dayonly", dest="night", action="store_false", help="Only take daytime screenshots.")
     daytime.add_argument("--nightonly", dest="day", action="store_false", help="Only take nighttime screenshots.")
-    parser.add_argument("--hd", action="store_true", help="Take screenshots of resolution 64 x 64 pixels per in-game tile.")
+    parser.add_argument("--hd", action="store_true", help="Take screenshots of resolution 64 x 64 pixels per in-game tile. Equivalent to --max-zoom 21.")
+    parser.add_argument("--max-zoom", dest="max_zoom", type=int, choices=(19, 20, 21), default=None, help="Deepest zoom level to capture, which is what sets the screenshot resolution: 19 is 16 pixels per in-game tile, 20 (the default) is 32, 21 is 64. Each level down is a quarter of the tiles and roughly a quarter of the disk, at half the detail. Fixed for an output folder by its first snapshot.")
     parser.add_argument("--quality", type=qualityArg, default=DEFAULTQUALITY, help=f"jpeg quality of the generated tiles, 1 to 100. Defaults to {DEFAULTQUALITY}. This is per snapshot: tiles already in the output folder keep the quality they were written at, and mixing them is fine.")
     parser.add_argument("--no-compress", dest="no_compress", action="store_true", help="Write tiles at maximum quality without compressing them, for when you want to postprocess them yourself. Ignores --quality and produces much larger files.")
     parser.add_argument("--no-altmode", dest="altmode", action="store_false", help="Hides entity info (alt mode).")
@@ -471,6 +473,15 @@ def auto(*args):
     parser.add_argument('--temp-dir', '--tempdir', type=lambda p: Path(p).resolve(), help='Set a custom temporary directory to use (this is only needed if the defualt one is on a RAM disk, which Factorio does not support).')
 
     args = parser.parse_args()
+
+    # --hd predates --max-zoom and is the same setting said another way. Resolve
+    # the two into max_zoom here so nothing downstream has to know about both.
+    if args.max_zoom is None:
+        args.max_zoom = 21 if args.hd else 20
+    elif args.hd and args.max_zoom != 21:
+        parser.error(f"--hd is --max-zoom 21, which contradicts --max-zoom {args.max_zoom}")
+    args.hd = args.max_zoom == 21
+
     if args.verbose > 0:
         print(args)
 

@@ -40,9 +40,14 @@ local function resolveSurface(surface, default, errorText)
 	end
 end
 
+-- matches pixelsPerTile in generateMap.lua: 2^(maxZoom-15)
 local roundMultiplier = 32
-if fm.autorun and fm.autorun.HD then
-	roundMultiplier = 64
+if fm.autorun then
+	if fm.autorun.maxZoom then
+		roundMultiplier = math.floor(2 ^ (fm.autorun.maxZoom - 15) + 0.5)
+	elseif fm.autorun.HD then
+		roundMultiplier = 64
+	end
 end
 
 local function parseLocation(options, optionName, isArea, canHaveSurface, defaultSurface)

@@ -54,6 +54,7 @@ script.on_event(defines.events.on_tick, function(event)
 						tag = fm.autorun.around_tag_range
 					},
 					HD = fm.autorun.HD,
+					maxZoom = fm.autorun.maxZoom,
 					day = fm.autorun.day,
 					night = fm.autorun.night,
 				}

@@ -47,6 +47,14 @@ RUN python3 -m venv /opt/venv \
 
 COPY . /opt/factoriomaps/
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# The viewer's javascript and css are fetched from a CDN. Doing that here rather
+# than per render means a render never depends on jsdelivr being reachable, and
+# never has to write into this directory — which the chmod below makes read only
+# for everyone but root, and the container is documented to run as the host user.
+# Called through -c because updateLib waits on stdin when run as __main__.
+RUN /opt/venv/bin/python -c "import sys; sys.path.insert(0, '/opt/factoriomaps'); import updateLib; updateLib.update(True)"
+
 RUN chmod +x /usr/local/bin/entrypoint.sh \
     && rm -rf /opt/factoriomaps/.git /opt/factoriomaps/.venv \
     && chmod -R a+rX /opt/factoriomaps \

@@ -1,0 +1,12 @@
+# web/lib is fetched during the build (see docker/Dockerfile), not copied in.
+# Without this, a build on a machine that has already run a render copies that
+# machine's lib directory into the image — including its mode bits, which
+# TemporaryDirectory leaves at 0700 — and the VERSION file inside it then makes
+# updateLib skip its own download. Same Dockerfile, two different images.
+web/lib/
+
+.git
+.venv
+__pycache__/
+*.pyc
+L0laapk3_FactorioMaps_*.zip

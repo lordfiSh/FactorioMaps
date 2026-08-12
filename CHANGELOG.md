@@ -21,6 +21,8 @@ it wants one line per change, not prose.
 
 - **A snapshot holding a damaged tile no longer costs the whole cross-referencing pass.** 5.0.2 taught `ref.py` to shrug off an index entry pointing at a tile that was never written, but a run killed while compressing leaves zero length and half written tiles as well, and those raise `UnidentifiedImageError` and a bare `OSError` instead of `FileNotFoundError`. Both escaped the guard and surfaced out of the worker pool, losing the surface. Any old tile that cannot be read is now treated as nothing to compare against; the newly rendered tile still raises if it is the broken one. (#9)
 
+- **A render no longer depends on a CDN being reachable.** The viewer's javascript and css were fetched on every run, outside any `try` and unaffected by `--no-update`, so a momentary failure at jsdelivr ended the render before Factorio started — after the caller had potentially already waited out a client download. They are fetched when the image is built now, and a run that still needs them falls back to whatever is already on disk. This also removes a write into a directory that is read-only for the unprivileged user the container is documented to run as. (#10)
+
 ## [5.0.2] — 2026-08-12
 
 ### Changed

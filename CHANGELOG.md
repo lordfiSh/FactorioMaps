@@ -27,6 +27,12 @@ it wants one line per change, not prose.
 
 - **A render no longer depends on a CDN being reachable.** The viewer's javascript and css were fetched on every run, outside any `try` and unaffected by `--no-update`, so a momentary failure at jsdelivr ended the render before Factorio started — after the caller had potentially already waited out a client download. They are fetched when the image is built now, and a run that still needs them falls back to whatever is already on disk. This also removes a write into a directory that is read-only for the unprivileged user the container is documented to run as. (#10)
 
+- **Switching planet or platform lands somewhere you can see it.** The viewer swapped which tile layers were on the map and left the centre and zoom exactly where the last surface had them. A space platform is a few chunks wide, parked somewhere else entirely, and its tiles start several zoom levels above a charted planet's — so arriving from Nauvis put you outside the platform's extent and below the zoom its tiles exist at, and Leaflet drew nothing. The view now recentres on the surface being opened and keeps the zoom only where that surface has tiles for it.
+
+- **A link naming a surface and a zoom but no position opens on that surface.** `#1/platform-7/18` fell back to arithmetic on the spawn point that divided by `2**(zoom-1)` where the rest of the viewer divides by `COORDSCALE`; the two agree only at zoom 16 on a display with no pixel scaling, so anywhere else the map opened a factor of two off per level, twice over on a HiDPI screen.
+
+- **Link boxes pointing at another surface work again.** The click handler switched surface by reaching into the old radio-selector control's DOM, and that control was replaced by the surface panels in 5.0.0 — the variable holding it has been declared and never assigned since, so every such click threw. It also asked whether the target was a different surface *after* switching to it, so it would have taken the same-surface branch even had it got that far.
+
 ## [5.0.2] — 2026-08-12
 
 ### Changed

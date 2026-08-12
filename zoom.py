@@ -2,6 +2,7 @@ import json
 import math
 import multiprocessing as mp
 from argparse import Namespace
+from collections import namedtuple
 import os
 from pathlib import Path
 from shutil import get_terminal_size as tsize
@@ -14,10 +15,7 @@ from turbojpeg import TurboJPEG
 
 from progress import Progress
 
-maxQuality = False  		# Set this to true if you want to compress/postprocess the images yourself later
-useBetterEncoder = True 	# Slower encoder that generates smaller images.
-
-quality = 80
+DEFAULTQUALITY = 80
 
 EXT = ".png"
 OUTEXT = ".jpg"     		# format='JPEG' is hardcoded in places, meed to modify those, too. Most parameters are not supported outside jpeg.
@@ -73,21 +71,36 @@ def loadTurboJpeg():
 jpeg = loadTurboJpeg()
 
 
-def saveCompress(img, path: Path):
-    if maxQuality:  # do not waste any time compressing the image
+# Workers are started with a bare mp.Process and nothing sets a start method, so
+# they fork on linux and spawn everywhere else. A module level setting would be
+# inherited in the first case and silently reset to its default in the second —
+# producing a valid jpeg at the wrong size, on some platforms only. Encode
+# settings therefore travel in the pickled arguments, never as global state.
+EncodeSettings = namedtuple("EncodeSettings", ("quality", "noCompress"))
+
+
+def encodeSettings(args: Namespace):
+    return EncodeSettings(
+        quality=getattr(args, "quality", DEFAULTQUALITY),
+        noCompress=getattr(args, "no_compress", False),
+    )
+
+
+def saveCompress(img, path: Path, settings: EncodeSettings):
+    if settings.noCompress:  # do not waste any time compressing the image
         return img.save(path, subsampling=0, quality=100)
 
     outFile = path.open("wb")
-    outFile.write(jpeg.encode(numpy.array(img)[:, :, ::-1].copy()))
+    outFile.write(jpeg.encode(numpy.array(img)[:, :, ::-1].copy(), quality=settings.quality))
     outFile.close()
 
 
-def simpleZoom(workQueue):
+def simpleZoom(workQueue, settings: EncodeSettings):
     for (folder, start, stop, filename) in workQueue:
         path = Path(folder, str(start), filename)
         img = Image.open(path.with_suffix(EXT), mode="r").convert("RGB")
         if OUTEXT != EXT:
-            saveCompress(img, path.with_suffix(OUTEXT))
+            saveCompress(img, path.with_suffix(OUTEXT), settings)
             path.with_suffix(EXT).unlink()
 
         for z in range(start - 1, stop - 1, -1):
@@ -96,7 +109,7 @@ def simpleZoom(workQueue):
             zFolder = Path(folder, str(z))
             if not zFolder.exists():
                 zFolder.mkdir(parents=True)
-            saveCompress(img, Path(zFolder, filename).with_suffix(OUTEXT))
+            saveCompress(img, Path(zFolder, filename).with_suffix(OUTEXT), settings)
 
 
 def zoomRenderboxes(daytimeSurfaces, toppath, timestamp, subpath, args):
@@ -184,14 +197,14 @@ def zoomRenderboxes(daytimeSurfaces, toppath, timestamp, subpath, args):
     processes = []
     zoomWork = list(zoomWork)
     for i in range(0, min(maxthreads, len(zoomWork))):
-        p = mp.Process(target=simpleZoom, args=(zoomWork[i::maxthreads],))
+        p = mp.Process(target=simpleZoom, args=(zoomWork[i::maxthreads], encodeSettings(args)))
         p.start()
         processes.append(p)
     for p in processes:
         p.join()
 
 
-def work(basepath, pathList, surfaceName, daytime, size, start, stop, last, chunk, keepLast=False):
+def work(basepath, pathList, surfaceName, daytime, size, start, stop, last, chunk, keepLast=False, *, settings: EncodeSettings):
     chunksize = 2 ** (start - stop)
     if start > stop:
         for k in range(start, stop, -1):
@@ -251,24 +264,24 @@ def work(basepath, pathList, surfaceName, daytime, size, start, stop, last, chun
                                     images.append((img, paths[m]))
 
                         if k == last + 1:
-                            saveCompress(result, Path(basepath, pathList[0], surfaceName, daytime, str(k - 1), str(i // 2), str(j // 2)).with_suffix(OUTEXT))
+                            saveCompress(result, Path(basepath, pathList[0], surfaceName, daytime, str(k - 1), str(i // 2), str(j // 2)).with_suffix(OUTEXT), settings)
                         if OUTEXT != EXT and (k != last + 1 or keepLast):
                             result.save(Path(basepath, pathList[0], surfaceName, daytime, str(k - 1), str(i // 2), str(j // 2), ).with_suffix(EXT))
 
                         if OUTEXT != EXT:
                             for img, path in images:
-                                saveCompress(img, path.with_suffix(OUTEXT))
+                                saveCompress(img, path.with_suffix(OUTEXT), settings)
                                 path.unlink()
 
             chunksize = chunksize // 2
     elif stop == last:
         path = Path(basepath, pathList[0], surfaceName, daytime, str(start), str(chunk[0]), str(chunk[1]))
         img = Image.open(path.with_suffix(EXT), mode="r").convert("RGB")
-        saveCompress(img, path.with_suffix(OUTEXT))
+        saveCompress(img, path.with_suffix(OUTEXT), settings)
         path.with_suffix(EXT).unlink()
 
 
-def thread(basepath, pathList, surfaceName, daytime, size, start, stop, last, allChunks, counter, resultQueue, keepLast=False):
+def thread(basepath, pathList, surfaceName, daytime, size, start, stop, last, allChunks, counter, resultQueue, keepLast=False, *, settings: EncodeSettings):
     #print(start, stop, chunks)
     while True:
         with counter.get_lock():
@@ -277,7 +290,7 @@ def thread(basepath, pathList, surfaceName, daytime, size, start, stop, last, al
                 return
             counter.value = i
         chunk = allChunks[i]
-        work(basepath, pathList, surfaceName, daytime, size, start, stop, last, chunk, keepLast)
+        work(basepath, pathList, surfaceName, daytime, size, start, stop, last, chunk, keepLast, settings=settings)
         resultQueue.put(True)
 
 
@@ -390,6 +403,7 @@ def zoom(
                                 for _ in range(0, threads):
                                     p = mp.Process(
                                         target=thread,
+                                        kwargs={"settings": encodeSettings(args)},
                                         args=(
                                             imagePath,
                                             pathList,
@@ -424,6 +438,7 @@ def zoom(
                                     for chunk in list(allBigChunks):
                                         p = mp.Process(
                                             target=work,
+                                            kwargs={"settings": encodeSettings(args)},
                                             args=(
                                                 imagePath,
                                                 pathList,

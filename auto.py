@@ -48,7 +48,7 @@ from PIL import Image, ImageChops
 from crop import crop
 from ref import ref
 from updateLib import update as updateLib
-from zoom import zoom, zoomRenderboxes
+from zoom import DEFAULTQUALITY, zoom, zoomRenderboxes
 
 def findUserFolder():
     # explicit wins, for containers and other unusual layouts
@@ -399,6 +399,16 @@ def buildConfig(args: Namespace, tmpDir, basepath):
     return configPath
 
 
+def qualityArg(value: str):
+    try:
+        quality = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{value}' is not a number")
+    if not 1 <= quality <= 100:
+        raise argparse.ArgumentTypeError(f"quality must be between 1 and 100, got {quality}")
+    return quality
+
+
 def auto(*args):
 
     lock = threading.Lock()
@@ -427,6 +437,8 @@ def auto(*args):
     daytime.add_argument("--dayonly", dest="night", action="store_false", help="Only take daytime screenshots.")
     daytime.add_argument("--nightonly", dest="day", action="store_false", help="Only take nighttime screenshots.")
     parser.add_argument("--hd", action="store_true", help="Take screenshots of resolution 64 x 64 pixels per in-game tile.")
+    parser.add_argument("--quality", type=qualityArg, default=DEFAULTQUALITY, help=f"jpeg quality of the generated tiles, 1 to 100. Defaults to {DEFAULTQUALITY}. This is per snapshot: tiles already in the output folder keep the quality they were written at, and mixing them is fine.")
+    parser.add_argument("--no-compress", dest="no_compress", action="store_true", help="Write tiles at maximum quality without compressing them, for when you want to postprocess them yourself. Ignores --quality and produces much larger files.")
     parser.add_argument("--no-altmode", dest="altmode", action="store_false", help="Hides entity info (alt mode).")
     parser.add_argument("--no-tags", dest="tags", action="store_false", help="Hides map tags")
     parser.add_argument("--default-timestamp", type=int, default=None, dest="default_timestamp", help="Snapshot that will be loaded by the webpage by default. Negative values indicate newest snapshots, so -1 indicates the newest map while 0 indicates the oldest map.")

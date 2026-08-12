@@ -13,6 +13,10 @@ it wants one line per change, not prose.
 
 ## [5.0.3] — 2026-08-12
 
+### Changed
+
+- **Tiles are written at quality 80, and `--quality` now sets it.** `zoom.py` had held a `quality = 80` that nothing ever read: the encoder was called without it and used its own default of 85, while the README explained how to change the setting that was not connected to anything. Connecting it makes each tile about 18% smaller, measured across sixty screenshots at 31.82 dB against 32.62. On a timeline the saving is smaller than that, because the extra codec noise pushes a few more unchanged tiles past the cross-referencing threshold and they are stored again rather than deduped — 11% of them against 8% at the old quality. Pass `--quality` to pick another value, or `--no-compress` for the uncompressed path that `maxQuality` used to select. (#11)
+
 ### Fixed
 
 - **A snapshot holding a damaged tile no longer costs the whole cross-referencing pass.** 5.0.2 taught `ref.py` to shrug off an index entry pointing at a tile that was never written, but a run killed while compressing leaves zero length and half written tiles as well, and those raise `UnidentifiedImageError` and a bare `OSError` instead of `FileNotFoundError`. Both escaped the guard and surfaced out of the worker pool, losing the surface. Any old tile that cannot be read is now treated as nothing to compare against; the newly rendered tile still raises if it is the broken one. (#9)

@@ -23,6 +23,7 @@ import configparser
 import datetime
 import json
 import errno
+import hashlib
 import math
 import multiprocessing as mp
 import re
@@ -315,6 +316,31 @@ def convertJSONFileToLua(path: Path):
         ))
 
 
+def saveIdentity(savePath: Path):
+    """What makes this savegame this savegame, and not the one rendered before it.
+
+    The tick the mod reads is not it. A client runs a varying handful of ticks
+    between loading a save and the capture starting, so the same file renders
+    under a slightly different tick every time, so a snapshot identified by tick
+    is a new snapshot on every run.
+
+    The zip's central directory answers it instead: entry names, sizes and CRCs
+    are read from the tail of the file, so this costs nothing on a save that is
+    fifty megabytes, and it survives the copy or hard link a caller stages the
+    save with.
+    """
+    try:
+        with ZipFile(savePath) as save:
+            listing = "".join(f"{i.filename} {i.file_size} {i.CRC}\n" for i in save.infolist())
+    except Exception:
+        # unreadable, or not a zip at all. name it by what the filesystem knows
+        # rather than giving up on telling two saves apart.
+        stat = savePath.stat()
+        listing = f"{savePath.name} {stat.st_size} {stat.st_mtime_ns}"
+
+    return hashlib.sha1(listing.encode("utf-8")).hexdigest()[:16]
+
+
 AUTORUN_PATH = Path(__file__, "..", "autorun.lua").resolve()
 # where updateLib puts the viewer's dependencies, and where they are copied from
 # into every generated map
@@ -322,11 +348,9 @@ LIB_PATH = Path(__file__, "..", "web", "lib").resolve()
 def clearAutorun():
     AUTORUN_PATH.open('w', encoding="utf-8").close()
 
-def buildAutorun(args: Namespace, workFolder: Path, outFolder: Path, isFirstSnapshot: bool, daytime: str):
+def buildAutorun(args: Namespace, workFolder: Path, outFolder: Path, saveId: str, daytime: str):
     printErase("Building autorun.lua")
     mapInfoLua = convertJSONFileToLua(Path(workFolder, "mapInfo.json"))
-
-    isFirstSnapshot = False
 
     chunkCache = convertJSONFileToLua(Path(workFolder, "chunkCache.json"))
 
@@ -352,6 +376,7 @@ def buildAutorun(args: Namespace, workFolder: Path, outFolder: Path, isFirstSnap
             date = "{datetime.datetime.strptime(args.date, "%d/%m/%y").strftime("%d/%m/%y")}",
             surfaces = {surfaceString},
             name = "{str(outFolder) + "/"}",
+            saveId = "{saveId}",
             mapInfo = {mapInfoLua},
             chunkCache = {chunkCache}
             }}'''
@@ -628,8 +653,6 @@ def auto(*args):
 
     datapath = Path(workfolder, "latest.txt")
 
-    isFirstSnapshot = True
-
     try:
 
         daytimes = []
@@ -639,14 +662,15 @@ def auto(*args):
         	daytimes.append("night")
 
         for index, savename in () if args.dry else enumerate(saveGames):
+            saveId = saveIdentity(Path(userFolder, 'saves', *(savename.split('/'))))
+
             for daytimeIndex, setDaytime in enumerate(daytimes):
 
                 printErase("cleaning up")
                 if datapath.is_file():
                     datapath.unlink()
 
-                buildAutorun(args, workfolder, foldername, isFirstSnapshot, setDaytime)
-                isFirstSnapshot = False
+                buildAutorun(args, workfolder, foldername, saveId, setDaytime)
 
                 if args.temp_dir is not None:
                     try:

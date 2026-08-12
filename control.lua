@@ -83,23 +83,45 @@ script.on_event(defines.events.on_tick, function(event)
 			fm.topfolder = fm.savename
 			fm.autorun.tick = game.tick
 
-			hour = math.ceil(fm.autorun.tick / 60 / 60 / 60)
-			exists = true
-			fm.autorun.filePath = tostring(hour)
-			local i = 1
-			while exists do
-				exists = false
-				if fm.autorun.mapInfo.maps ~= nil then
-					for _, map in pairs(fm.autorun.mapInfo.maps) do
-						if map.path == fm.autorun.filePath and map.tick ~= fm.autorun.tick then
-							exists = true
-							break
-						end
+			-- a snapshot belongs to a savegame, and the tick is not a property of
+			-- one: the client runs a varying handful of ticks between loading a
+			-- save and this running. Identify the save itself, or rendering it
+			-- again appends a second snapshot of the same factory.
+			local previous = nil
+			if fm.autorun.saveId and fm.autorun.mapInfo.maps ~= nil then
+				for _, map in pairs(fm.autorun.mapInfo.maps) do
+					if map.saveId == fm.autorun.saveId then
+						previous = map
+						break
 					end
 				end
-				if exists then
-					fm.autorun.filePath = tostring(hour) .. "-" .. tostring(i)
-					i = i + 1
+			end
+
+			if previous ~= nil then
+				-- take over the entry whole, tick included, so the chunk cache
+				-- written under that tick still belongs to it
+				fm.autorun.filePath = previous.path
+				fm.autorun.tick = previous.tick
+				log("Save already rendered as snapshot " .. previous.path .. ", replacing it")
+			else
+				hour = math.ceil(fm.autorun.tick / 60 / 60 / 60)
+				exists = true
+				fm.autorun.filePath = tostring(hour)
+				local i = 1
+				while exists do
+					exists = false
+					if fm.autorun.mapInfo.maps ~= nil then
+						for _, map in pairs(fm.autorun.mapInfo.maps) do
+							if map.path == fm.autorun.filePath and map.tick ~= fm.autorun.tick then
+								exists = true
+								break
+							end
+						end
+					end
+					if exists then
+						fm.autorun.filePath = tostring(hour) .. "-" .. tostring(i)
+						i = i + 1
+					end
 				end
 			end
 			

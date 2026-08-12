@@ -316,6 +316,9 @@ def convertJSONFileToLua(path: Path):
 
 
 AUTORUN_PATH = Path(__file__, "..", "autorun.lua").resolve()
+# where updateLib puts the viewer's dependencies, and where they are copied from
+# into every generated map
+LIB_PATH = Path(__file__, "..", "web", "lib").resolve()
 def clearAutorun():
     AUTORUN_PATH.open('w', encoding="utf-8").close()
 
@@ -562,7 +565,18 @@ def auto(*args):
     except FileExistsError:
         raise Exception(f"{workfolder} exists and is not a directory!")
 
-    updateLib(args.force_lib_update)
+    # The docker image fetches these at build time, so normally there is nothing
+    # to do here. When there is, a CDN that will not answer should not cost a
+    # render worth an hour of screenshots — fall back to the libs already on
+    # disk, and only give up when there are none.
+    try:
+        updateLib(args.force_lib_update)
+    except (urllib.error.URLError, OSError) as e:
+        if not Path(LIB_PATH, "VERSION").is_file():
+            raise Exception(
+                f"could not fetch the web dependencies and none are present at {LIB_PATH}: {e}"
+            )
+        print(f"warning: could not update the web dependencies ({e}), using the ones already present")
 
     #TODO: integrity check, if done files aren't there or there are any bmps left, complain.
 
@@ -997,7 +1011,7 @@ def auto(*args):
             rmtree(os.path.join(workfolder, "lib"))
         except (FileNotFoundError, NotADirectoryError):
             pass
-        copytree(Path(__file__, "..", "web", "lib").resolve(), os.path.join(workfolder, "lib"))
+        copytree(LIB_PATH, os.path.join(workfolder, "lib"))
 
 
 

@@ -13,6 +13,10 @@ it wants one line per change, not prose.
 
 ## [5.0.3] — 2026-08-12
 
+### Added
+
+- **`--max-zoom` chooses how much detail a capture holds.** 19, 20 or 21, where 21 is what `--hd` has always meant and 19 is half the resolution of the default. The deepest zoom level is around three quarters of a map's tiles, so dropping one takes a folder to roughly a quarter of the size — at half the detail, which is a visible change rather than a compression trade. Fixed for a folder by its first snapshot. 19 is the floor because below it a single image would span more than one chunk, which the charted-chunk scan cannot express. (#12)
+
 ### Changed
 
 - **Tiles are written at quality 80, and `--quality` now sets it.** `zoom.py` had held a `quality = 80` that nothing ever read: the encoder was called without it and used its own default of 85, while the README explained how to change the setting that was not connected to anything. Connecting it makes each tile about 18% smaller, measured across sixty screenshots at 31.82 dB against 32.62. On a timeline the saving is smaller than that, because the extra codec noise pushes a few more unchanged tiles past the cross-referencing threshold and they are stored again rather than deduped — 11% of them against 8% at the old quality. Pass `--quality` to pick another value, or `--no-compress` for the uncompressed path that `maxQuality` used to select. (#11)

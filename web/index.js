@@ -301,18 +301,21 @@ function updateLabels() {
 					case "link_box_point":
 					case "link_box_area":
 						label.marker._icon.onmousedown = function() {
-							if (label.link.toSurface != currentSurface)
-								Array.from(surfaceSlider._container.children[0].children).find(e => e.innerText == label.link.toSurface).click();
+							// answered before the switch, because selectSurface is
+							// what makes it stop being true
+							const crossSurface = label.link.toSurface != currentSurface;
+							if (crossSurface)
+								selectSurface(label.link.toSurface);
 
 							switch (label.link.type) {
 								case "link_box_point":
-									if (label.link.toSurface != currentSurface)
+									if (crossSurface)
 										map.panTo(convertCoordinates(label.link.to));
 									else
 										map.setView(convertCoordinates(label.link.to), map.getZoom());
 									break;
 								case "link_box_area":
-									if (label.link.toSurface != currentSurface)
+									if (crossSurface)
 										map.flyToBounds([convertCoordinates(label.link.to[0]), convertCoordinates(label.link.to[1])]);
 									else
 										map.fitBounds([convertCoordinates(label.link.to[0]), convertCoordinates(label.link.to[1])], map.getZoom());
@@ -435,8 +438,10 @@ try {
 		currentSurface = split[1];
 		loadLayer = someSurfaces[currentSurface].layers;
 		if (!isNaN(parseInt(split[2]))) startZ = parseInt(split[2]);
-		startX = parseInt(split[3]) / COORDSCALE || startX;
-		startY = parseInt(split[4]) / COORDSCALE || startY;
+		// parseFloat, because condRound writes fractions above globalMaxZoom, and
+		// an explicit isNaN, because a centre of exactly 0 is falsy
+		if (!isNaN(parseFloat(split[3]))) startX = parseFloat(split[3]) / COORDSCALE;
+		if (!isNaN(parseFloat(split[4]))) startY = parseFloat(split[4]) / COORDSCALE;
 		nightOpacity = parseFloat(split[5]) || nightOpacity;
 		if (!isNaN(parseInt(split[6]))) {
 			timestamp = split[6];
@@ -448,10 +453,15 @@ try {
 		window.location.href = "#";
 		window.location.reload();
 }
-if (isNaN(startX) || isNaN(startY)) {
-	let spawn = mapInfo.maps.find(m => m.path == timestamp).surfaces[currentSurface].spawn;
-	startX = -spawn.y / 2**(startZ-1);
-	startY = spawn.x / 2**(startZ-1);
+// a hash naming a surface and a zoom but no coordinates - or naming nothing at
+// all - opens on the whole surface, at a zoom that surface actually has tiles for
+{
+	const view = surfaceView(currentSurface, startZ);
+	startZ = view.zoom;
+	if (isNaN(startX) || isNaN(startY)) {
+		startX = view.center.lat;
+		startY = view.center.lng;
+	}
 }
 
 
@@ -501,7 +511,7 @@ function updateRenderboxOpacities(noUpdateLabels) {
 }
 
 
-let daylightSlider, timeSlider, surfaceSlider;
+let daylightSlider, timeSlider;
 let mapLoadedBySlider = false;
 if (Object.values(layers).some(s => Object.values(s).some(l => l.day)) && Object.values(layers).some(s => Object.values(s).some(l => l.night))) {
 	daylightSlider = new L.Control.opacitySlider({
@@ -623,8 +633,66 @@ function surfaceMeta(name) {
 	return {};
 }
 function surfaceTileLayers(name) {
-	return Object.values(layers[name]).map(l => ["day", "night"].map(d => l[d]).filter(d => d)).flat();
+	// a surface can be named by a snapshot without ever having been captured,
+	// and then it has no layers at all
+	return Object.values(layers[name] || {}).map(l => ["day", "night"].map(d => l[d]).filter(d => d)).flat();
 }
+
+// nothing stores a surface's bounding box, so read the extent back out of the
+// tile index. the night index is a superset of the day one, so scan that.
+function surfaceBounds(name) {
+	const index = globalTileNightIndex[name];
+	if (!index)
+		return null;
+
+	// every level covers the same ground - the coarse ones are the finest one
+	// shifted down - so take the finest, where the extent is not rounded out to
+	// a grid eight times wider. even a fully charted nauvis is a few thousand
+	// keys to walk, which costs a fraction of a millisecond.
+	const z = Math.max(...Object.keys(index).filter(k => k != "fallback").map(Number));
+	if (!isFinite(z) || !index[z])
+		return null;
+
+	let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+	for (const y in index[z])
+		for (const x in index[z][y]) {
+			minX = Math.min(minX, +x);
+			maxX = Math.max(maxX, +x);
+			minY = Math.min(minY, +y);
+			maxY = Math.max(maxY, +y);
+		}
+	if (minX > maxX)
+		return null;
+
+	// the transform the tile layers themselves use, rather than a second guess
+	// at COORDSCALE. works before the map exists, which is where it is needed.
+	const tileSize = 512 / window.devicePixelRatio;
+	function corner(x, y) {
+		return L.CRS.Simple.pointToLatLng(L.point(x * tileSize, y * tileSize), z);
+	}
+	return L.latLngBounds(corner(minX, minY), corner(maxX + 1, maxY + 1));
+}
+
+// where to look when arriving at a surface with no coordinates of its own.
+// a platform is a few chunks wide, parked somewhere entirely different, and
+// its tiles start several zoom levels above a charted planet's - so the
+// previous surface's centre shows nothing and its zoom may not even exist here.
+function surfaceView(name, preferredZoom) {
+	let minZoom = Infinity, maxZoom = -Infinity;
+	for (const layer of surfaceTileLayers(name)) {
+		minZoom = Math.min(minZoom, layer.options.minZoom);
+		maxZoom = Math.max(maxZoom, layer.options.maxZoom);
+	}
+	const zoom = Math.min(maxZoom, Math.max(minZoom, preferredZoom));
+
+	const bounds = surfaceBounds(name);
+	const spawn = surfaceMeta(name).spawn || { x: 0, y: 0 };
+	return {
+		center: bounds ? bounds.getCenter() : L.latLng(convertCoordinates(spawn)),
+		zoom: isFinite(zoom) ? zoom : preferredZoom
+	};
+}
+
 function prettyName(name) {
 	return name.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -757,6 +825,10 @@ function selectSurface(name) {
 	currentSurface = name;
 	applySurfaceSelection(name);
 	surfacePanels.forEach(p => p.setSelected(name));
+	// leaflet keeps the centre and zoom across a layer swap, which for a
+	// surface somewhere else entirely is a blank screen
+	const view = surfaceView(name, map.getZoom());
+	map.setView(view.center, view.zoom, { animate: false });
 	updateHash();
 	updateLabels();
 }
